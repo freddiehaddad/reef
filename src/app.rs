@@ -1,4 +1,4 @@
-use crate::types::{Book, Config, FocusTarget, Viewport};
+use crate::types::{Book, Config, FocusTarget, Viewport, TocState};
 
 pub struct AppState {
     pub book: Option<Book>,
@@ -8,6 +8,10 @@ pub struct AppState {
     pub focus: FocusTarget,
     pub config: Config,
     pub should_quit: bool,
+    pub toc_panel_visible: bool,
+    pub toc_state: TocState,
+    pub titlebar_visible: bool,
+    pub statusbar_visible: bool,
 }
 
 impl AppState {
@@ -24,14 +28,200 @@ impl AppState {
             focus: FocusTarget::Content,
             config,
             should_quit: false,
+            toc_panel_visible: false,
+            toc_state: TocState::new(),
+            titlebar_visible: true,
+            statusbar_visible: true,
         }
     }
 
     pub fn load_book(&mut self, book: Book) {
+        // Build TOC tree before storing the book
+        self.build_toc_tree(&book);
+        
         self.book = Some(book);
         self.current_chapter = 0;
         self.cursor_line = 0;
         self.viewport.scroll_offset = 0;
+        
+        // Sync TOC to initial position
+        self.sync_toc_to_cursor();
+    }
+
+    fn build_toc_tree(&mut self, book: &Book) {
+        use tui_tree_widget::TreeItem;
+        
+        let mut items = Vec::new();
+        
+        for (chapter_idx, chapter) in book.chapters.iter().enumerate() {
+            let chapter_id = format!("chapter_{}", chapter_idx);
+            
+            if chapter.sections.is_empty() {
+                // Chapter with no sections
+                items.push(TreeItem::new_leaf(chapter_id, chapter.title.clone()));
+            } else {
+                // Chapter with sections
+                let mut section_items = Vec::new();
+                for (section_idx, section) in chapter.sections.iter().enumerate() {
+                    let section_id = format!("chapter_{}_section_{}", chapter_idx, section_idx);
+                    section_items.push(TreeItem::new_leaf(section_id, section.title.clone()));
+                }
+                items.push(TreeItem::new(chapter_id, chapter.title.clone(), section_items).expect("Failed to create tree item"));
+            }
+        }
+        
+        self.toc_state.items = items;
+        self.toc_state.tree_state.select_first();
+    }
+
+    pub fn toggle_toc(&mut self) {
+        self.toc_panel_visible = !self.toc_panel_visible;
+        
+        // If closing TOC panel while it has focus, move focus back to Content
+        if !self.toc_panel_visible && self.focus == FocusTarget::TOC {
+            self.focus = FocusTarget::Content;
+        }
+    }
+
+    pub fn toggle_titlebar(&mut self) {
+        self.titlebar_visible = !self.titlebar_visible;
+        
+        // Update viewport height
+        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        self.update_viewport_size(width, height);
+    }
+
+    pub fn toggle_statusbar(&mut self) {
+        self.statusbar_visible = !self.statusbar_visible;
+        
+        // Update viewport height
+        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        self.update_viewport_size(width, height);
+    }
+
+    /// Synchronize TOC selection to match current cursor position
+    pub fn sync_toc_to_cursor(&mut self) {
+        if self.book.is_none() {
+            return;
+        }
+
+        // Determine which TOC item should be selected based on cursor position
+        let target_id = if let Some(chapter) = self.get_current_chapter() {
+            if chapter.sections.is_empty() {
+                // No sections, select the chapter
+                format!("chapter_{}", self.current_chapter)
+            } else {
+                // Find which section contains the cursor
+                let mut current_section_idx = None;
+                for (idx, section) in chapter.sections.iter().enumerate() {
+                    let next_start = chapter.sections.get(idx + 1)
+                        .map(|s| s.start_line)
+                        .unwrap_or(usize::MAX);
+                    if section.start_line <= self.cursor_line && self.cursor_line < next_start {
+                        current_section_idx = Some(idx);
+                        break;
+                    }
+                }
+
+                if let Some(sec_idx) = current_section_idx {
+                    // Cursor is in a section
+                    format!("chapter_{}_section_{}", self.current_chapter, sec_idx)
+                } else {
+                    // Cursor is before first section, select the chapter
+                    format!("chapter_{}", self.current_chapter)
+                }
+            }
+        } else {
+            return;
+        };
+
+        // Update tree state selection to the target ID
+        self.toc_state.tree_state.select(vec![target_id]);
+    }
+
+    pub fn cycle_focus(&mut self) {
+        // Cycle through open panels only
+        self.focus = match self.focus {
+            FocusTarget::Content => {
+                if self.toc_panel_visible {
+                    FocusTarget::TOC
+                } else {
+                    FocusTarget::Content
+                }
+            }
+            FocusTarget::TOC => FocusTarget::Content,
+            FocusTarget::Bookmarks => FocusTarget::Content, // Bookmarks not yet implemented
+        };
+    }
+
+    pub fn focus_toc(&mut self) {
+        if self.toc_panel_visible {
+            self.focus = FocusTarget::TOC;
+        }
+    }
+
+    pub fn focus_content(&mut self) {
+        self.focus = FocusTarget::Content;
+    }
+
+    pub fn toc_next(&mut self) {
+        self.toc_state.tree_state.key_down();
+    }
+
+    pub fn toc_previous(&mut self) {
+        self.toc_state.tree_state.key_up();
+    }
+
+    pub fn toc_open(&mut self) {
+        self.toc_state.tree_state.toggle_selected();
+    }
+
+    pub fn toc_close(&mut self) {
+        if let Some(selected) = self.toc_state.tree_state.selected().first() {
+            let selected_vec = vec![selected.clone()];
+            self.toc_state.tree_state.close(&selected_vec);
+        }
+    }
+
+    pub fn toc_select(&mut self) {
+        // Get selected item ID
+        if let Some(selected_id) = self.toc_state.tree_state.selected().first() {
+            // Parse the ID to determine chapter and section
+            if selected_id.starts_with("chapter_") {
+                let parts: Vec<&str> = selected_id.split('_').collect();
+                if parts.len() == 2 {
+                    // Just a chapter ID: "chapter_0"
+                    if let Ok(chapter_idx) = parts[1].parse::<usize>() {
+                        if chapter_idx < self.total_chapters() {
+                            self.current_chapter = chapter_idx;
+                            self.cursor_line = 0;
+                            self.viewport.scroll_offset = 0;
+                        }
+                    }
+                } else if parts.len() == 4 && parts[2] == "section" {
+                    // Section ID: "chapter_0_section_1"
+                    if let (Ok(chapter_idx), Ok(section_idx)) = (
+                        parts[1].parse::<usize>(),
+                        parts[3].parse::<usize>(),
+                    ) {
+                        if chapter_idx < self.total_chapters() {
+                            self.current_chapter = chapter_idx;
+                            
+                            // Get section start_line before borrowing self mutably
+                            let section_start_line = self.book.as_ref()
+                                .and_then(|b| b.chapters.get(chapter_idx))
+                                .and_then(|ch| ch.sections.get(section_idx))
+                                .map(|s| s.start_line);
+                                
+                            if let Some(start_line) = section_start_line {
+                                self.cursor_line = start_line;
+                                self.viewport.scroll_offset = start_line;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn get_current_chapter(&self) -> Option<&crate::types::Chapter> {
@@ -115,6 +305,9 @@ impl AppState {
         self.current_chapter = (self.current_chapter + 1) % total;
         self.cursor_line = 0;
         self.viewport.scroll_offset = 0;
+        
+        // Sync TOC to new position
+        self.sync_toc_to_cursor();
     }
 
     pub fn previous_chapter(&mut self) {
@@ -131,6 +324,84 @@ impl AppState {
         
         self.cursor_line = 0;
         self.viewport.scroll_offset = 0;
+        
+        // Sync TOC to new position
+        self.sync_toc_to_cursor();
+    }
+
+    pub fn next_section(&mut self) {
+        if let Some(chapter) = self.get_current_chapter() {
+            if chapter.sections.is_empty() {
+                // No sections, jump to next chapter
+                self.next_chapter();
+                return;
+            }
+
+            // Find current section
+            let current_section_idx = chapter.sections.iter().position(|s| {
+                s.start_line > self.cursor_line
+            }).unwrap_or(chapter.sections.len());
+
+            if current_section_idx < chapter.sections.len() {
+                // Jump to next section in current chapter
+                let target_line = chapter.sections[current_section_idx].start_line;
+                self.cursor_line = target_line;
+                self.viewport.scroll_offset = target_line;
+            } else {
+                // At last section, jump to next chapter
+                self.next_chapter();
+                return; // next_chapter already syncs TOC
+            }
+        }
+        
+        // Sync TOC to new position
+        self.sync_toc_to_cursor();
+    }
+
+    pub fn previous_section(&mut self) {
+        if let Some(chapter) = self.get_current_chapter() {
+            if chapter.sections.is_empty() {
+                // No sections, jump to previous chapter
+                self.previous_chapter();
+                return;
+            }
+
+            // Find current section - we're in the section if start_line <= cursor_line < next_start_line
+            let mut current_section_idx = None;
+            for (idx, section) in chapter.sections.iter().enumerate() {
+                if section.start_line <= self.cursor_line {
+                    let next_start = chapter.sections.get(idx + 1)
+                        .map(|s| s.start_line)
+                        .unwrap_or(usize::MAX);
+                    if self.cursor_line < next_start {
+                        current_section_idx = Some(idx);
+                        break;
+                    }
+                }
+            }
+
+            match current_section_idx {
+                Some(0) => {
+                    // At first section, jump to previous chapter
+                    self.previous_chapter();
+                    return; // previous_chapter already syncs TOC
+                }
+                Some(idx) => {
+                    // Jump to previous section
+                    let target_line = chapter.sections[idx - 1].start_line;
+                    self.cursor_line = target_line;
+                    self.viewport.scroll_offset = target_line;
+                }
+                None => {
+                    // Before first section or no current section, jump to previous chapter
+                    self.previous_chapter();
+                    return; // previous_chapter already syncs TOC
+                }
+            }
+        }
+        
+        // Sync TOC to new position
+        self.sync_toc_to_cursor();
     }
 
     pub fn page_down(&mut self) {
@@ -171,7 +442,10 @@ impl AppState {
 
     pub fn update_viewport_size(&mut self, width: u16, height: u16) {
         self.viewport.width = width;
-        // Reserve space for titlebar and statusbar
-        self.viewport.height = height.saturating_sub(2);
+        // Reserve space for titlebar and statusbar if visible
+        let reserved_height = 
+            (if self.titlebar_visible { 1 } else { 0 }) +
+            (if self.statusbar_visible { 1 } else { 0 });
+        self.viewport.height = height.saturating_sub(reserved_height);
     }
 }

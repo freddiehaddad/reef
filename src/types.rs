@@ -20,6 +20,38 @@ pub struct Section {
     pub start_line: usize,
 }
 
+// For managing TOC tree state
+pub struct TocState {
+    pub tree_state: tui_tree_widget::TreeState<String>,
+    pub items: Vec<tui_tree_widget::TreeItem<'static, String>>,
+}
+
+impl TocState {
+    pub fn new() -> Self {
+        TocState {
+            tree_state: tui_tree_widget::TreeState::default(),
+            items: Vec::new(),
+        }
+    }
+}
+
+impl Clone for TocState {
+    fn clone(&self) -> Self {
+        TocState {
+            tree_state: tui_tree_widget::TreeState::default(),
+            items: self.items.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for TocState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TocState")
+            .field("items", &self.items)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RenderedLine {
     pub text: String,

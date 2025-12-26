@@ -10,7 +10,7 @@ use cli::Cli;
 use clap::Parser;
 use crossterm::{
     cursor::{Hide, Show},
-    event::{self, Event},
+    event::{self, Event, KeyEventKind},
     execute,
     terminal::{
         disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -150,14 +150,14 @@ fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
     while running.load(Ordering::SeqCst) && !app.should_quit {
         // Render
         terminal.draw(|f| {
-            ui::layout::render(f, &app);
+            ui::layout::render(f, &mut app);
         })?;
 
         // Handle input
         if event::poll(std::time::Duration::from_millis(100))? {
             let ev = event::read()?;
             match ev {
-                Event::Key(key) => {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
                     ui::handle_key_event(&mut app, key)?;
                 }
                 Event::Resize(width, height) => {

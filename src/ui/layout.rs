@@ -1,25 +1,63 @@
 use crate::app::AppState;
+use crate::types::FocusTarget;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
+use tui_tree_widget::Tree;
 
-pub fn render(f: &mut Frame, app: &AppState) {
-    let chunks = Layout::default()
+pub fn render(f: &mut Frame, app: &mut AppState) {
+    // Calculate constraints based on visibility
+    let mut constraints = Vec::new();
+    
+    if app.titlebar_visible {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Min(0)); // Content area
+    if app.statusbar_visible {
+        constraints.push(Constraint::Length(1));
+    }
+    
+    let main_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // Titlebar
-            Constraint::Min(0),     // Content
-            Constraint::Length(1), // Statusbar
-        ])
+        .constraints(constraints)
         .split(f.area());
 
-    render_titlebar(f, app, chunks[0]);
-    render_content(f, app, chunks[1]);
-    render_statusbar(f, app, chunks[2]);
+    let mut chunk_idx = 0;
+    
+    // Render titlebar if visible
+    if app.titlebar_visible {
+        render_titlebar(f, app, main_chunks[chunk_idx]);
+        chunk_idx += 1;
+    }
+    
+    // Render content area (may include TOC panel)
+    let content_area = main_chunks[chunk_idx];
+    chunk_idx += 1;
+    
+    if app.toc_panel_visible {
+        // Split content area for TOC and main content
+        let content_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(app.config.toc_panel_width),
+                Constraint::Min(0),
+            ])
+            .split(content_area);
+        
+        render_toc(f, app, content_chunks[0]);
+        render_content(f, app, content_chunks[1]);
+    } else {
+        render_content(f, app, content_area);
+    }
+    
+    // Render statusbar if visible
+    if app.statusbar_visible {
+        render_statusbar(f, app, main_chunks[chunk_idx]);
+    }
 }
 
 fn render_titlebar(f: &mut Frame, app: &AppState, area: Rect) {
@@ -86,9 +124,36 @@ fn render_statusbar(f: &mut Frame, app: &AppState, area: Rect) {
             0
         };
         
+        // Determine current section
+        let section_info = if let Some(chapter) = app.get_current_chapter() {
+            if !chapter.sections.is_empty() {
+                // Find which section contains the cursor
+                let mut current_section_idx = None;
+                for (idx, section) in chapter.sections.iter().enumerate() {
+                    let next_start = chapter.sections.get(idx + 1)
+                        .map(|s| s.start_line)
+                        .unwrap_or(usize::MAX);
+                    if section.start_line <= app.cursor_line && app.cursor_line < next_start {
+                        current_section_idx = Some(idx + 1);
+                        break;
+                    }
+                }
+                
+                if let Some(sec_idx) = current_section_idx {
+                    format!(" | Sec {}/{}", sec_idx, chapter.sections.len())
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        
         format!(
-            "Ch {}/{} | Line {}/{} ({}%)",
-            current_ch, total_ch, current_line, total_lines, percentage
+            "Ch {}/{}{}  | Line {}/{} ({}%)",
+            current_ch, total_ch, section_info, current_line, total_lines, percentage
         )
     } else {
         "No book loaded".to_string()
@@ -98,4 +163,31 @@ fn render_statusbar(f: &mut Frame, app: &AppState, area: Rect) {
         .style(Style::default().fg(Color::White).bg(Color::DarkGray));
     
     f.render_widget(status, area);
+}
+
+fn render_toc(f: &mut Frame, app: &mut AppState, area: Rect) {
+    let is_focused = app.focus == FocusTarget::TOC;
+    
+    let border_style = if is_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style)
+        .title("TOC");
+    
+    let tree = Tree::new(&app.toc_state.items)
+        .expect("Failed to create tree")
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    
+    f.render_stateful_widget(tree, area, &mut app.toc_state.tree_state);
 }
