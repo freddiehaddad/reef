@@ -3,6 +3,7 @@ mod bookmarks;
 mod cli;
 mod epub;
 mod error;
+mod persistence;
 mod search;
 mod types;
 mod ui;
@@ -19,13 +20,14 @@ use crossterm::{
     },
 };
 use error::{AppError, Result};
+use persistence::PersistenceManager;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::EnvFilter;
-use types::Config;
+use types::{Config, UiMode};
 
 fn main() {
     if let Err(e) = run() {
@@ -116,13 +118,23 @@ fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app state
-    let mut config = Config::default();
+    // Initialize persistence manager
+    let persistence = PersistenceManager::new()
+        .map_err(|e| AppError::Other(format!("Failed to initialize persistence: {}", e)))?;
+    
+    // Load config
+    let mut config = persistence.load_config()
+        .unwrap_or_else(|e| {
+            tracing::warn!("Failed to load config: {}. Using defaults.", e);
+            Config::default()
+        });
+    
+    // Override with CLI arguments
     if let Some(max_width) = cli.max_width {
         config.max_width = Some(max_width);
     }
 
-    let mut app = AppState::new(config);
+    let mut app = AppState::new(config, persistence);
     
     // Get terminal size and update viewport
     let (width, height) = crossterm::terminal::size()?;
@@ -145,7 +157,25 @@ fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
             epub::render_chapter(chapter, app.config.max_width, app.viewport.width);
         }
 
-        app.load_book(book);
+        // Load book with path (handles persistence)
+        app.load_book_with_path(file_path.clone())
+            .map_err(|e| AppError::Other(format!("Failed to load book: {}", e)))?;
+        
+        // Re-render with actual book content (in case of resize)
+        if let Some(book) = &mut app.book {
+            for chapter in &mut book.chapters {
+                epub::render_chapter(chapter, app.config.max_width, app.viewport.width);
+            }
+        }
+    } else {
+        // No file provided - check if we have recent books
+        if app.recent_books.is_empty() {
+            return Err(AppError::Other("No recent books. Usage: epub-reader <file.epub>".to_string()));
+        }
+        
+        // Show book picker
+        app.ui_mode = UiMode::BookPicker;
+        app.book_picker_selected_idx = Some(0);
     }
 
     // Main event loop
@@ -175,6 +205,11 @@ fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
                 _ => {}
             }
         }
+    }
+
+    // Save state before quitting
+    if let Err(e) = app.save_state() {
+        tracing::error!("Failed to save state: {}", e);
     }
 
     tracing::info!("EPUB Reader shutting down");

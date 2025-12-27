@@ -1,4 +1,6 @@
 use crate::types::{Book, Bookmark, Config, FocusTarget, SearchMatch, TocState, UiMode, Viewport};
+use crate::persistence::{PersistenceManager, ReadingProgress};
+use std::collections::HashMap;
 
 pub struct AppState {
     pub book: Option<Book>,
@@ -29,10 +31,20 @@ pub struct AppState {
     
     // Bookmarks
     pub bookmarks: Vec<Bookmark>,
+    
+    // Persistence
+    pub persistence: PersistenceManager,
+    pub reading_progress: HashMap<String, ReadingProgress>,
+    pub recent_books: Vec<String>,
+    pub current_book_path: Option<String>,
+    pub book_picker_selected_idx: Option<usize>,
 }
 
 impl AppState {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, persistence: PersistenceManager) -> Self {
+        let reading_progress = persistence.load_reading_progress().unwrap_or_default();
+        let recent_books = persistence.load_recent_books().unwrap_or_default();
+        
         AppState {
             book: None,
             viewport: Viewport {
@@ -58,6 +70,11 @@ impl AppState {
             current_search_idx: 0,
             input_buffer: String::new(),
             bookmarks: Vec::new(),
+            persistence,
+            reading_progress,
+            recent_books,
+            current_book_path: None,
+            book_picker_selected_idx: None,
         }
     }
 
@@ -590,6 +607,100 @@ impl AppState {
             
             // Sync TOC
             self.sync_toc_to_cursor();
+        }
+    }
+
+    // Persistence methods
+    pub fn save_state(&mut self) -> anyhow::Result<()> {
+        // Save current book progress if we have one
+        if let Some(book_path) = &self.current_book_path {
+            let progress = ReadingProgress {
+                chapter_idx: self.current_chapter,
+                line: self.cursor_line,
+                scroll_offset: self.viewport.scroll_offset,
+                last_read: chrono::Utc::now(),
+                toc_expansion_state: self.get_toc_expansion_state(),
+            };
+            
+            self.reading_progress.insert(book_path.clone(), progress);
+            
+            // Save bookmarks for current book
+            self.persistence.save_bookmarks(book_path, &self.bookmarks)?;
+        }
+        
+        // Save reading progress
+        self.persistence.save_reading_progress(&self.reading_progress)?;
+        
+        // Save recent books
+        self.persistence.save_recent_books(&self.recent_books)?;
+        
+        // Save config
+        self.persistence.save_config(&self.config)?;
+        
+        Ok(())
+    }
+    
+    pub fn load_book_with_path(&mut self, book_path: String) -> anyhow::Result<()> {
+        use crate::persistence::canonicalize_path;
+        
+        // Canonicalize the path
+        let canonical_path = canonicalize_path(&book_path)?;
+        
+        // Add to recent books (or move to top if already present)
+        if let Some(pos) = self.recent_books.iter().position(|p| p == &canonical_path) {
+            self.recent_books.remove(pos);
+        }
+        self.recent_books.insert(0, canonical_path.clone());
+        
+        // Load the EPUB
+        let book = crate::epub::parse_epub(&book_path)?;
+        
+        // Load bookmarks for this book
+        let bookmarks = self.persistence.load_bookmarks(&canonical_path).unwrap_or_default();
+        self.bookmarks = bookmarks;
+        
+        // Load and clone reading progress to avoid borrow issues
+        let progress = self.reading_progress.get(&canonical_path).cloned();
+        
+        // Store current book path
+        self.current_book_path = Some(canonical_path);
+        
+        // Build TOC tree before storing the book
+        self.build_toc_tree(&book);
+        
+        // Restore position if we have progress
+        if let Some(progress) = progress {
+            self.current_chapter = progress.chapter_idx.min(book.chapters.len().saturating_sub(1));
+            self.cursor_line = progress.line;
+            self.viewport.scroll_offset = progress.scroll_offset;
+            
+            // Restore TOC expansion state
+            self.restore_toc_expansion_state(&progress.toc_expansion_state);
+        } else {
+            self.current_chapter = 0;
+            self.cursor_line = 0;
+            self.viewport.scroll_offset = 0;
+        }
+        
+        self.book = Some(book);
+        
+        // Sync TOC to restored position
+        self.sync_toc_to_cursor();
+        
+        Ok(())
+    }
+    
+    fn get_toc_expansion_state(&self) -> Vec<String> {
+        // Get list of expanded node identifiers
+        // For now, we'll return an empty list since TreeState doesn't expose
+        // the internal state easily. This can be enhanced later.
+        Vec::new()
+    }
+    
+    fn restore_toc_expansion_state(&mut self, state: &[String]) {
+        // Expand nodes that were previously expanded
+        for id in state {
+            self.toc_state.tree_state.open(vec![id.clone()]);
         }
     }
 }

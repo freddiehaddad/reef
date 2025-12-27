@@ -94,7 +94,7 @@ pub enum FocusTarget {
     Bookmarks,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     pub max_width: Option<usize>,
     pub toc_panel_width: u16,
@@ -121,7 +121,7 @@ pub struct SearchMatch {
     pub match_text: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Bookmark {
     pub chapter_idx: usize,
     pub line: usize,
@@ -133,4 +133,8 @@ pub enum UiMode {
     Normal,
     SearchPopup,
     BookmarkPrompt,
+    BookPicker,
+    Help,
+    MetadataPopup,
+    ErrorPopup(String),
 }

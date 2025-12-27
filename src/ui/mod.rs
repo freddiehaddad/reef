@@ -8,12 +8,24 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 pub fn handle_key_event(app: &mut AppState, key: KeyEvent) -> Result<()> {
     // Route input based on UI mode first
-    match app.ui_mode {
+    match &app.ui_mode {
         UiMode::SearchPopup => {
             handle_search_popup_input(app, key)?;
         }
         UiMode::BookmarkPrompt => {
             handle_bookmark_prompt_input(app, key)?;
+        }
+        UiMode::BookPicker => {
+            handle_book_picker_input(app, key)?;
+        }
+        UiMode::Help => {
+            handle_help_input(app, key)?;
+        }
+        UiMode::MetadataPopup => {
+            handle_metadata_popup_input(app, key)?;
+        }
+        UiMode::ErrorPopup(_) => {
+            handle_error_popup_input(app, key)?;
         }
         UiMode::Normal => {
             // Route based on focus
@@ -110,6 +122,94 @@ fn handle_bookmark_prompt_input(app: &mut AppState, key: KeyEvent) -> Result<()>
             if app.input_buffer.len() < 100 {
                 app.input_buffer.push(c);
             }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_book_picker_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc => {
+            if app.book.is_none() {
+                // No book loaded, exit app
+                app.should_quit = true;
+            } else {
+                // Book loaded, close picker
+                app.ui_mode = UiMode::Normal;
+            }
+        }
+        KeyCode::Char('q') => {
+            app.should_quit = true;
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            if let Some(idx) = app.book_picker_selected_idx {
+                let next_idx = (idx + 1).min(app.recent_books.len().saturating_sub(1));
+                app.book_picker_selected_idx = Some(next_idx);
+            }
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            if let Some(idx) = app.book_picker_selected_idx {
+                app.book_picker_selected_idx = Some(idx.saturating_sub(1));
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(idx) = app.book_picker_selected_idx {
+                if let Some(book_path) = app.recent_books.get(idx).cloned() {
+                    // Load the selected book
+                    match app.load_book_with_path(book_path.clone()) {
+                        Ok(_) => {
+                            // Render all chapters
+                            if let Some(book) = &mut app.book {
+                                for chapter in &mut book.chapters {
+                                    crate::epub::render_chapter(chapter, app.config.max_width, app.viewport.width);
+                                }
+                            }
+                            app.ui_mode = UiMode::Normal;
+                            app.focus = FocusTarget::Content;
+                        }
+                        Err(e) => {
+                            app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", e));
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_help_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('?') | KeyCode::F(1) => {
+            app.ui_mode = UiMode::Normal;
+            if let Some(prev_focus) = app.previous_focus.take() {
+                app.focus = prev_focus;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_metadata_popup_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('I') => {
+            app.ui_mode = UiMode::Normal;
+            if let Some(prev_focus) = app.previous_focus.take() {
+                app.focus = prev_focus;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_error_popup_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter => {
+            app.ui_mode = UiMode::Normal;
         }
         _ => {}
     }
@@ -343,6 +443,34 @@ fn handle_content_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
             app.previous_focus = Some(app.focus.clone());
             app.ui_mode = UiMode::BookmarkPrompt;
             app.input_buffer.clear();
+        }
+
+        // Help
+        KeyCode::Char('?') | KeyCode::F(1) => {
+            app.previous_focus = Some(app.focus.clone());
+            app.ui_mode = UiMode::Help;
+        }
+
+        // Metadata popup
+        KeyCode::Char('I') => {
+            app.previous_focus = Some(app.focus.clone());
+            app.ui_mode = UiMode::MetadataPopup;
+        }
+
+        // Book picker
+        KeyCode::Char('o') | KeyCode::Char('O') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.previous_focus = Some(app.focus.clone());
+            app.ui_mode = UiMode::BookPicker;
+            
+            // Set selection to current book if available
+            if let Some(current_path) = &app.current_book_path {
+                app.book_picker_selected_idx = app.recent_books
+                    .iter()
+                    .position(|p| p == current_path)
+                    .or(Some(0));
+            } else {
+                app.book_picker_selected_idx = Some(0);
+            }
         }
 
         // Cursor movement

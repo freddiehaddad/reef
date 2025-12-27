@@ -70,7 +70,7 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
     }
     
     // Render popups on top
-    match app.ui_mode {
+    match &app.ui_mode {
         UiMode::SearchPopup => {
             // Check for regex validation error
             let error = if !app.input_buffer.is_empty() {
@@ -108,6 +108,25 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
                 suggestion.as_deref(),
                 error,
             );
+        }
+        UiMode::BookPicker => {
+            widgets::popups::book_picker::render_book_picker(
+                f,
+                &app.recent_books,
+                app.book_picker_selected_idx,
+            );
+        }
+        UiMode::Help => {
+            // TODO: Implement help popup
+        }
+        UiMode::MetadataPopup => {
+            if let Some(book) = &app.book {
+                widgets::popups::metadata::render_metadata_popup(f, &book.metadata);
+            }
+        }
+        UiMode::ErrorPopup(message) => {
+            // TODO: Implement error popup
+            let _ = message; // Silence unused warning
         }
         UiMode::Normal => {}
     }
