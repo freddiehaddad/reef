@@ -253,6 +253,9 @@ fn handle_bookmarks_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
         KeyCode::Char('b') => {
             app.toggle_bookmarks();
         }
+        KeyCode::Char('z') => {
+            app.toggle_zen_mode();
+        }
 
         // Focus management
         KeyCode::Tab => {
@@ -312,6 +315,9 @@ fn handle_toc_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Char('b') => {
             app.toggle_bookmarks();
+        }
+        KeyCode::Char('z') => {
+            app.toggle_zen_mode();
         }
 
         // Search
@@ -423,6 +429,9 @@ fn handle_content_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Char('b') => {
             app.toggle_bookmarks();
+        }
+        KeyCode::Char('z') => {
+            app.toggle_zen_mode();
         }
 
         // Search

@@ -117,7 +117,7 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
             );
         }
         UiMode::Help => {
-            // TODO: Implement help popup
+            widgets::popups::help::render_help_popup(f, f.area());
         }
         UiMode::MetadataPopup => {
             if let Some(book) = &app.book {
@@ -125,8 +125,7 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
             }
         }
         UiMode::ErrorPopup(message) => {
-            // TODO: Implement error popup
-            let _ = message; // Silence unused warning
+            widgets::popups::error::render_error_popup(f, message, f.area());
         }
         UiMode::Normal => {}
     }

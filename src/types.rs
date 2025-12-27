@@ -138,3 +138,11 @@ pub enum UiMode {
     MetadataPopup,
     ErrorPopup(String),
 }
+
+#[derive(Debug, Clone)]
+pub struct ZenModeState {
+    pub toc_visible: bool,
+    pub bookmarks_visible: bool,
+    pub statusbar_visible: bool,
+    pub titlebar_visible: bool,
+}

@@ -200,6 +200,15 @@ fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
                         for chapter in &mut book.chapters {
                             epub::render_chapter(chapter, app.config.max_width, app.viewport.width);
                         }
+                        
+                        // Re-apply search highlights if there are active results
+                        if !app.search_results.is_empty() {
+                            // Re-run search to recalculate match positions in new line structure
+                            if let Ok(new_results) = search::SearchEngine::search(book, &app.search_query) {
+                                app.search_results = new_results;
+                                search::SearchEngine::apply_highlights(book, &app.search_results);
+                            }
+                        }
                     }
                 }
                 _ => {}

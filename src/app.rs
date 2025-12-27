@@ -1,4 +1,4 @@
-use crate::types::{Book, Bookmark, Config, FocusTarget, SearchMatch, TocState, UiMode, Viewport};
+use crate::types::{Book, Bookmark, Config, FocusTarget, SearchMatch, TocState, UiMode, Viewport, ZenModeState};
 use crate::persistence::{PersistenceManager, ReadingProgress};
 use std::collections::HashMap;
 
@@ -22,6 +22,10 @@ pub struct AppState {
     pub selected_bookmark_idx: Option<usize>,
     pub titlebar_visible: bool,
     pub statusbar_visible: bool,
+    
+    // Zen Mode
+    pub zen_mode_active: bool,
+    pub pre_zen_state: Option<ZenModeState>,
     
     // Search
     pub search_query: String,
@@ -65,6 +69,8 @@ impl AppState {
             selected_bookmark_idx: None,
             titlebar_visible: true,
             statusbar_visible: true,
+            zen_mode_active: false,
+            pre_zen_state: None,
             search_query: String::new(),
             search_results: Vec::new(),
             current_search_idx: 0,
@@ -145,6 +151,39 @@ impl AppState {
 
     pub fn toggle_statusbar(&mut self) {
         self.statusbar_visible = !self.statusbar_visible;
+        
+        // Update viewport height
+        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        self.update_viewport_size(width, height);
+    }
+
+    pub fn toggle_zen_mode(&mut self) {
+        if self.zen_mode_active {
+            // Exiting zen mode - restore previous state
+            if let Some(state) = &self.pre_zen_state {
+                self.toc_panel_visible = state.toc_visible;
+                self.bookmarks_panel_visible = state.bookmarks_visible;
+                self.statusbar_visible = state.statusbar_visible;
+                self.titlebar_visible = state.titlebar_visible;
+            }
+            self.zen_mode_active = false;
+            self.pre_zen_state = None;
+        } else {
+            // Entering zen mode - save current state
+            self.pre_zen_state = Some(ZenModeState {
+                toc_visible: self.toc_panel_visible,
+                bookmarks_visible: self.bookmarks_panel_visible,
+                statusbar_visible: self.statusbar_visible,
+                titlebar_visible: self.titlebar_visible,
+            });
+            
+            // Hide everything
+            self.toc_panel_visible = false;
+            self.bookmarks_panel_visible = false;
+            self.statusbar_visible = false;
+            self.titlebar_visible = false;
+            self.zen_mode_active = true;
+        }
         
         // Update viewport height
         let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
@@ -642,6 +681,11 @@ impl AppState {
     
     pub fn load_book_with_path(&mut self, book_path: String) -> anyhow::Result<()> {
         use crate::persistence::canonicalize_path;
+        
+        // Clear search state when switching books
+        self.search_query.clear();
+        self.search_results.clear();
+        self.current_search_idx = 0;
         
         // Canonicalize the path
         let canonical_path = canonicalize_path(&book_path)?;
