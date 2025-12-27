@@ -1,5 +1,5 @@
 use crate::app::AppState;
-use crate::types::FocusTarget;
+use crate::types::{FocusTarget, LineStyle};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -88,14 +88,36 @@ fn render_content(f: &mut Frame, app: &AppState, area: Rect) {
         for (idx, line) in chapter.content_lines[visible_start..visible_end].iter().enumerate() {
             let global_line_idx = visible_start + idx;
             
-            // Highlight cursor line with subtle background
-            let style = if global_line_idx == app.cursor_line {
-                Style::default().bg(Color::Rgb(40, 40, 50))
-            } else {
-                Style::default()
+            // Determine style based on line type
+            let mut base_style = match &line.style {
+                LineStyle::Heading1 => Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                LineStyle::Heading2 => Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+                LineStyle::Heading3 => Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+                LineStyle::CodeBlock { .. } => Style::default()
+                    .fg(Color::Green),
+                LineStyle::InlineCode => Style::default()
+                    .fg(Color::Yellow),
+                LineStyle::Quote => Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC),
+                LineStyle::Link => Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::UNDERLINED),
+                LineStyle::Normal => Style::default(),
             };
             
-            lines.push(Line::from(Span::styled(line.text.clone(), style)));
+            // Add cursor background highlight
+            if global_line_idx == app.cursor_line {
+                base_style = base_style.bg(Color::Rgb(40, 40, 50));
+            }
+            
+            lines.push(Line::from(Span::styled(line.text.clone(), base_style)));
         }
         
         let paragraph = Paragraph::new(lines)
