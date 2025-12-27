@@ -1,7 +1,9 @@
 mod app;
+mod bookmarks;
 mod cli;
 mod epub;
 mod error;
+mod search;
 mod types;
 mod ui;
 

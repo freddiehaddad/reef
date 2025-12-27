@@ -1,4 +1,4 @@
-use crate::types::{Book, Config, FocusTarget, Viewport, TocState};
+use crate::types::{Book, Bookmark, Config, FocusTarget, SearchMatch, TocState, UiMode, Viewport};
 
 pub struct AppState {
     pub book: Option<Book>,
@@ -8,10 +8,27 @@ pub struct AppState {
     pub focus: FocusTarget,
     pub config: Config,
     pub should_quit: bool,
+    
+    // UI Mode
+    pub ui_mode: UiMode,
+    pub previous_focus: Option<FocusTarget>,
+    
+    // Panels
     pub toc_panel_visible: bool,
     pub toc_state: TocState,
+    pub bookmarks_panel_visible: bool,
+    pub selected_bookmark_idx: Option<usize>,
     pub titlebar_visible: bool,
     pub statusbar_visible: bool,
+    
+    // Search
+    pub search_query: String,
+    pub search_results: Vec<SearchMatch>,
+    pub current_search_idx: usize,
+    pub input_buffer: String,
+    
+    // Bookmarks
+    pub bookmarks: Vec<Bookmark>,
 }
 
 impl AppState {
@@ -28,10 +45,19 @@ impl AppState {
             focus: FocusTarget::Content,
             config,
             should_quit: false,
+            ui_mode: UiMode::Normal,
+            previous_focus: None,
             toc_panel_visible: false,
             toc_state: TocState::new(),
+            bookmarks_panel_visible: false,
+            selected_bookmark_idx: None,
             titlebar_visible: true,
             statusbar_visible: true,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            current_search_idx: 0,
+            input_buffer: String::new(),
+            bookmarks: Vec::new(),
         }
     }
 
@@ -79,6 +105,15 @@ impl AppState {
         
         // If closing TOC panel while it has focus, move focus back to Content
         if !self.toc_panel_visible && self.focus == FocusTarget::TOC {
+            self.focus = FocusTarget::Content;
+        }
+    }
+
+    pub fn toggle_bookmarks(&mut self) {
+        self.bookmarks_panel_visible = !self.bookmarks_panel_visible;
+        
+        // If closing bookmarks panel while it has focus, move focus back to Content
+        if !self.bookmarks_panel_visible && self.focus == FocusTarget::Bookmarks {
             self.focus = FocusTarget::Content;
         }
     }
@@ -145,12 +180,20 @@ impl AppState {
             FocusTarget::Content => {
                 if self.toc_panel_visible {
                     FocusTarget::TOC
+                } else if self.bookmarks_panel_visible {
+                    FocusTarget::Bookmarks
                 } else {
                     FocusTarget::Content
                 }
             }
-            FocusTarget::TOC => FocusTarget::Content,
-            FocusTarget::Bookmarks => FocusTarget::Content, // Bookmarks not yet implemented
+            FocusTarget::TOC => {
+                if self.bookmarks_panel_visible {
+                    FocusTarget::Bookmarks
+                } else {
+                    FocusTarget::Content
+                }
+            }
+            FocusTarget::Bookmarks => FocusTarget::Content,
         };
     }
 
@@ -162,6 +205,12 @@ impl AppState {
 
     pub fn focus_content(&mut self) {
         self.focus = FocusTarget::Content;
+    }
+
+    pub fn focus_bookmarks(&mut self) {
+        if self.bookmarks_panel_visible {
+            self.focus = FocusTarget::Bookmarks;
+        }
     }
 
     pub fn toc_next(&mut self) {
@@ -447,5 +496,100 @@ impl AppState {
             (if self.titlebar_visible { 1 } else { 0 }) +
             (if self.statusbar_visible { 1 } else { 0 });
         self.viewport.height = height.saturating_sub(reserved_height);
+    }
+
+    // Bookmark methods
+    pub fn bookmark_next(&mut self) {
+        if self.bookmarks.is_empty() {
+            return;
+        }
+        
+        let current_idx = self.selected_bookmark_idx.unwrap_or(0);
+        let next_idx = (current_idx + 1) % self.bookmarks.len();
+        self.selected_bookmark_idx = Some(next_idx);
+    }
+
+    pub fn bookmark_previous(&mut self) {
+        if self.bookmarks.is_empty() {
+            return;
+        }
+        
+        let current_idx = self.selected_bookmark_idx.unwrap_or(0);
+        let next_idx = if current_idx == 0 {
+            self.bookmarks.len() - 1
+        } else {
+            current_idx - 1
+        };
+        self.selected_bookmark_idx = Some(next_idx);
+    }
+
+    pub fn jump_to_selected_bookmark(&mut self) {
+        if let Some(idx) = self.selected_bookmark_idx {
+            if let Some(bookmark) = self.bookmarks.get(idx) {
+                self.current_chapter = bookmark.chapter_idx;
+                self.cursor_line = bookmark.line;
+                
+                // Center the line in viewport
+                let half_viewport = self.viewport.height as usize / 2;
+                self.viewport.scroll_offset = bookmark.line.saturating_sub(half_viewport);
+                
+                // Sync TOC
+                self.sync_toc_to_cursor();
+            }
+        }
+    }
+
+    pub fn delete_selected_bookmark(&mut self) {
+        if let Some(idx) = self.selected_bookmark_idx {
+            if idx < self.bookmarks.len() {
+                self.bookmarks.remove(idx);
+                
+                // Update selection
+                if self.bookmarks.is_empty() {
+                    self.selected_bookmark_idx = None;
+                } else if idx >= self.bookmarks.len() {
+                    // Was at last bookmark, move to previous
+                    self.selected_bookmark_idx = Some(self.bookmarks.len() - 1);
+                }
+                // Otherwise, keep same index (moves to next bookmark)
+            }
+        }
+    }
+
+    // Search methods
+    pub fn next_search_result(&mut self) {
+        if self.search_results.is_empty() {
+            return;
+        }
+        
+        self.current_search_idx = (self.current_search_idx + 1) % self.search_results.len();
+        self.jump_to_current_search_result();
+    }
+
+    pub fn previous_search_result(&mut self) {
+        if self.search_results.is_empty() {
+            return;
+        }
+        
+        if self.current_search_idx == 0 {
+            self.current_search_idx = self.search_results.len() - 1;
+        } else {
+            self.current_search_idx -= 1;
+        }
+        self.jump_to_current_search_result();
+    }
+
+    fn jump_to_current_search_result(&mut self) {
+        if let Some(result) = self.search_results.get(self.current_search_idx) {
+            self.current_chapter = result.chapter_idx;
+            self.cursor_line = result.line;
+            
+            // Center the line in viewport
+            let half_viewport = self.viewport.height as usize / 2;
+            self.viewport.scroll_offset = result.line.saturating_sub(half_viewport);
+            
+            // Sync TOC
+            self.sync_toc_to_cursor();
+        }
     }
 }

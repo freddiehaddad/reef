@@ -1,5 +1,6 @@
 use crate::app::AppState;
-use crate::types::{FocusTarget, LineStyle};
+use crate::types::{FocusTarget, LineStyle, UiMode};
+use crate::ui::widgets;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -34,29 +35,81 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
         chunk_idx += 1;
     }
     
-    // Render content area (may include TOC panel)
+    // Render content area (may include TOC and Bookmarks panels)
     let content_area = main_chunks[chunk_idx];
     chunk_idx += 1;
     
+    let mut toc_bookmarks_constraints = Vec::new();
     if app.toc_panel_visible {
-        // Split content area for TOC and main content
-        let content_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(app.config.toc_panel_width),
-                Constraint::Min(0),
-            ])
-            .split(content_area);
-        
-        render_toc(f, app, content_chunks[0]);
-        render_content(f, app, content_chunks[1]);
-    } else {
-        render_content(f, app, content_area);
+        toc_bookmarks_constraints.push(Constraint::Length(app.config.toc_panel_width));
+    }
+    toc_bookmarks_constraints.push(Constraint::Min(0)); // Main content
+    if app.bookmarks_panel_visible {
+        toc_bookmarks_constraints.push(Constraint::Length(app.config.bookmarks_panel_width));
+    }
+    
+    let content_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(toc_bookmarks_constraints)
+        .split(content_area);
+    
+    let mut chunk_index = 0;
+    if app.toc_panel_visible {
+        render_toc(f, app, content_chunks[chunk_index]);
+        chunk_index += 1;
+    }
+    render_content(f, app, content_chunks[chunk_index]);
+    chunk_index += 1;
+    if app.bookmarks_panel_visible {
+        render_bookmarks(f, app, content_chunks[chunk_index]);
     }
     
     // Render statusbar if visible
     if app.statusbar_visible {
         render_statusbar(f, app, main_chunks[chunk_idx]);
+    }
+    
+    // Render popups on top
+    match app.ui_mode {
+        UiMode::SearchPopup => {
+            // Check for regex validation error
+            let error = if !app.input_buffer.is_empty() {
+                regex::Regex::new(&app.input_buffer).err().map(|e| format!("Invalid regex: {}", e))
+            } else {
+                None
+            };
+            widgets::popups::search::render_search_popup(f, &app.input_buffer, error.as_deref());
+        }
+        UiMode::BookmarkPrompt => {
+            // Generate suggestion
+            let suggestion = if let Some(chapter) = app.get_current_chapter() {
+                if let Some(line) = chapter.content_lines.get(app.cursor_line) {
+                    crate::bookmarks::BookmarkManager::generate_label_suggestion(
+                        &line.text,
+                        &chapter.title,
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // Check for empty label error
+            let error = if app.input_buffer.trim().is_empty() && !app.input_buffer.is_empty() {
+                Some("Label cannot be empty")
+            } else {
+                None
+            };
+            
+            widgets::popups::bookmark_prompt::render_bookmark_prompt(
+                f,
+                &app.input_buffer,
+                suggestion.as_deref(),
+                error,
+            );
+        }
+        UiMode::Normal => {}
     }
 }
 
@@ -88,36 +141,65 @@ fn render_content(f: &mut Frame, app: &AppState, area: Rect) {
         for (idx, line) in chapter.content_lines[visible_start..visible_end].iter().enumerate() {
             let global_line_idx = visible_start + idx;
             
-            // Determine style based on line type
-            let mut base_style = match &line.style {
-                LineStyle::Heading1 => Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                LineStyle::Heading2 => Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-                LineStyle::Heading3 => Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
-                LineStyle::CodeBlock { .. } => Style::default()
-                    .fg(Color::Green),
-                LineStyle::InlineCode => Style::default()
-                    .fg(Color::Yellow),
-                LineStyle::Quote => Style::default()
-                    .fg(Color::Gray)
-                    .add_modifier(Modifier::ITALIC),
-                LineStyle::Link => Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::UNDERLINED),
-                LineStyle::Normal => Style::default(),
-            };
-            
-            // Add cursor background highlight
-            if global_line_idx == app.cursor_line {
-                base_style = base_style.bg(Color::Rgb(40, 40, 50));
+            // Apply search highlighting if there are matches in this line
+            if !line.search_matches.is_empty() {
+                // Build line with search highlights
+                let mut spans = Vec::new();
+                let mut last_pos = 0;
+                
+                for (start, end) in &line.search_matches {
+                    // Add text before match
+                    if *start > last_pos {
+                        let base_style = get_line_style(&line.style, global_line_idx, app.cursor_line);
+                        spans.push(Span::styled(
+                            line.text[last_pos..*start].to_string(),
+                            base_style,
+                        ));
+                    }
+                    
+                    // Determine if this is the current search result
+                    let is_current_match = if !app.search_results.is_empty() {
+                        let current_result = &app.search_results[app.current_search_idx];
+                        current_result.chapter_idx == app.current_chapter
+                            && current_result.line == global_line_idx
+                            && current_result.column == *start
+                    } else {
+                        false
+                    };
+                    
+                    // Add highlighted match
+                    let highlight_color = if is_current_match {
+                        Color::Rgb(255, 200, 100) // Current match: bright yellow/orange
+                    } else {
+                        Color::Rgb(200, 150, 50) // Other matches: darker yellow
+                    };
+                    
+                    let mut match_style = get_line_style(&line.style, global_line_idx, app.cursor_line);
+                    match_style = match_style.bg(highlight_color).fg(Color::Black);
+                    
+                    spans.push(Span::styled(
+                        line.text[*start..*end].to_string(),
+                        match_style,
+                    ));
+                    
+                    last_pos = *end;
+                }
+                
+                // Add remaining text after last match
+                if last_pos < line.text.len() {
+                    let base_style = get_line_style(&line.style, global_line_idx, app.cursor_line);
+                    spans.push(Span::styled(
+                        line.text[last_pos..].to_string(),
+                        base_style,
+                    ));
+                }
+                
+                lines.push(Line::from(spans));
+            } else {
+                // No search matches, render normally
+                let base_style = get_line_style(&line.style, global_line_idx, app.cursor_line);
+                lines.push(Line::from(Span::styled(line.text.clone(), base_style)));
             }
-            
-            lines.push(Line::from(Span::styled(line.text.clone(), base_style)));
         }
         
         let paragraph = Paragraph::new(lines)
@@ -131,6 +213,38 @@ fn render_content(f: &mut Frame, app: &AppState, area: Rect) {
             .alignment(ratatui::layout::Alignment::Center);
         f.render_widget(text, area);
     }
+}
+
+fn get_line_style(line_style: &LineStyle, line_idx: usize, cursor_line: usize) -> Style {
+    let mut base_style = match line_style {
+        LineStyle::Heading1 => Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        LineStyle::Heading2 => Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+        LineStyle::Heading3 => Style::default()
+            .fg(Color::Blue)
+            .add_modifier(Modifier::BOLD),
+        LineStyle::CodeBlock { .. } => Style::default()
+            .fg(Color::Green),
+        LineStyle::InlineCode => Style::default()
+            .fg(Color::Yellow),
+        LineStyle::Quote => Style::default()
+            .fg(Color::Gray)
+            .add_modifier(Modifier::ITALIC),
+        LineStyle::Link => Style::default()
+            .fg(Color::Blue)
+            .add_modifier(Modifier::UNDERLINED),
+        LineStyle::Normal => Style::default(),
+    };
+    
+    // Add cursor background highlight
+    if line_idx == cursor_line {
+        base_style = base_style.bg(Color::Rgb(40, 40, 50));
+    }
+    
+    base_style
 }
 
 fn render_statusbar(f: &mut Frame, app: &AppState, area: Rect) {
@@ -180,8 +294,26 @@ fn render_statusbar(f: &mut Frame, app: &AppState, area: Rect) {
     } else {
         "No book loaded".to_string()
     };
+    
+    // Append search info if active
+    let full_status = if !app.search_results.is_empty() {
+        let query_display = if app.search_query.len() > 20 {
+            format!("{}...", &app.search_query[..17])
+        } else {
+            app.search_query.clone()
+        };
+        format!(
+            "{} | [Search: '{}' {}/{}]",
+            status_text,
+            query_display,
+            app.current_search_idx + 1,
+            app.search_results.len()
+        )
+    } else {
+        status_text
+    };
 
-    let status = Paragraph::new(status_text)
+    let status = Paragraph::new(full_status)
         .style(Style::default().fg(Color::White).bg(Color::DarkGray));
     
     f.render_widget(status, area);
@@ -212,4 +344,16 @@ fn render_toc(f: &mut Frame, app: &mut AppState, area: Rect) {
         );
     
     f.render_stateful_widget(tree, area, &mut app.toc_state.tree_state);
+}
+
+fn render_bookmarks(f: &mut Frame, app: &AppState, area: Rect) {
+    let is_focused = app.focus == FocusTarget::Bookmarks;
+    
+    let panel = widgets::bookmarks::BookmarksPanel::new(
+        &app.bookmarks,
+        app.selected_bookmark_idx,
+        is_focused,
+    );
+    
+    panel.render(f, area);
 }

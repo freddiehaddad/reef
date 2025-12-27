@@ -110,3 +110,27 @@ impl Default for Config {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct SearchMatch {
+    pub chapter_idx: usize,
+    pub line: usize,
+    pub column: usize,
+    pub match_length: usize,
+    pub context: String,
+    pub match_text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Bookmark {
+    pub chapter_idx: usize,
+    pub line: usize,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UiMode {
+    Normal,
+    SearchPopup,
+    BookmarkPrompt,
+}
