@@ -134,8 +134,8 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             max_width: None,
-            toc_panel_width: 30,
-            bookmarks_panel_width: 35,
+            toc_panel_width: 34,
+            bookmarks_panel_width: 34,
         }
     }
 }
