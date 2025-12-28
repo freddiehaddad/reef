@@ -502,6 +502,33 @@ fn detect_language(code_element: ElementRef) -> Option<String> {
     None
 }
 
+/// Add wrapped text lines with inline styling preserved across line breaks
+///
+/// This function handles the complex task of maintaining inline style ranges
+/// (bold, italic, code, etc.) when text is wrapped across multiple lines.
+///
+/// # How it works:
+/// 1. Wraps text to fit within the specified width
+/// 2. For each wrapped line, recalculates style positions relative to that line
+/// 3. Preserves styles that span across line breaks
+///
+/// # Example:
+/// ```text
+/// Input text: "This is **bold text** that wraps"
+/// Input styles: [(8, 17, Bold)]  // "bold text" is bold
+/// Width: 20
+///
+/// Result:
+/// Line 1: "This is **bold"      styles: [(8, 14, Bold)]
+/// Line 2: "text** that wraps"   styles: [(0, 4, Bold)]
+/// ```
+///
+/// # Arguments:
+/// * `lines` - Accumulator for rendered lines
+/// * `text` - Raw text content to wrap and style
+/// * `width` - Maximum line width in characters
+/// * `style` - Block-level style (Heading, Normal, Quote, etc.)
+/// * `inline_styles` - Vec of (start, end, InlineStyle) tuples in original text coordinates
 fn add_text_lines(
     lines: &mut Vec<RenderedLine>,
     text: &str,
@@ -513,38 +540,68 @@ fn add_text_lines(
         return;
     }
 
+    // Wrap text to fit within width (textwrap handles word boundaries intelligently)
     let wrapped = wrap(text, width);
+
+    // Track our position in the original text as we process wrapped lines
+    // This is crucial for mapping inline styles from original text to wrapped lines
     let mut char_offset = 0;
 
     for wrapped_line in wrapped {
         let line_text = wrapped_line.to_string();
         let line_len = line_text.len();
+
+        // Calculate the character range this line occupies in the original text
+        // Example: if char_offset=10 and line_len=20, this line spans chars [10, 30)
         let line_end = char_offset + line_len;
 
-        // Find inline styles that overlap with this wrapped line
+        // Find inline styles that overlap with this wrapped line and adjust their positions
         let mut line_inline_styles = Vec::new();
         for (start, end, style_type) in &inline_styles {
-            // Check if this style range overlaps with current line
+            // Check if this style range overlaps with current line's range [char_offset, line_end)
+            // A style overlaps if it ends after our start AND starts before our end
             if *end > char_offset && *start < line_end {
-                // Adjust positions relative to this line
+                // The style overlaps! Now translate its position to be relative to this line.
+                //
+                // Example: Original text "Hello **world** friend"
+                //          Style range: [6, 11] (bold "world")
+                //          Line 1: "Hello"        [0, 5]   - no overlap
+                //          Line 2: "**world**"    [6, 13]  - overlaps at [6, 11]
+                //                   Relative to line 2: [0, 5]
+                //
+                // new_start = max(style_start, line_start) - line_start
+                //           = max(6, 6) - 6 = 0
+                // new_end = min(style_end, line_end) - line_start
+                //         = min(11, 13) - 6 = 5
                 let new_start = (*start).max(char_offset) - char_offset;
                 let new_end = (*end).min(line_end) - char_offset;
+
+                // Only add if we have a valid range (prevents zero-length or negative ranges)
                 if new_end > new_start {
                     line_inline_styles.push((new_start, new_end, style_type.clone()));
                 }
             }
         }
 
+        // Create the rendered line with adjusted inline styles
         lines.push(RenderedLine {
             text: line_text,
             style: style.clone(),
-            search_matches: Vec::new(),
+            search_matches: Vec::new(), // Will be populated during search
             inline_styles: line_inline_styles,
         });
 
-        // Account for space or newline that was removed by wrapping
+        // Move our position forward in the original text
         char_offset = line_end;
-        // textwrap removes spaces at wrap points, so we need to account for that
+
+        // IMPORTANT: textwrap removes spaces at line break points, but they still
+        // exist in the original text. We need to skip past them to keep our offset
+        // in sync with the original text positions.
+        //
+        // Example: "word1 word2 word3" wrapped at width 6
+        //   Line 1: "word1"  (chars 0-5)
+        //   Space at position 5 is removed by wrapping
+        //   Line 2: "word2"  (chars 6-11 in original, but we need to account for the space)
         if char_offset < text.len() && text.chars().nth(char_offset) == Some(' ') {
             char_offset += 1;
         }
