@@ -1,78 +1,64 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 
 /// Render the search popup
 pub fn render_search_popup(frame: &mut Frame, input: &str, error: Option<&str>) {
-    let area = centered_rect(50, 20, frame.area());
+    // Calculate popup width (50% of screen width)
+    let popup_width = (frame.area().width as f32 * 0.5) as u16;
+    // Height for one line of input plus borders
+    let popup_height = 3;
+
+    let popup_x = (frame.area().width.saturating_sub(popup_width)) / 2;
+    let popup_y = (frame.area().height.saturating_sub(popup_height)) / 2;
+
+    let area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: popup_height,
+    };
 
     // Clear the area
     frame.render_widget(Clear, area);
 
     // Create the popup content
     let block = Block::default()
-        .title("Search")
+        .title(" Search ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(if error.is_some() {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default().fg(Color::Cyan)
+        });
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Layout for search input and error/hint
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // Prompt
-            Constraint::Length(1), // Input
-            Constraint::Min(1),    // Error or hint
-        ])
-        .split(inner);
+    // Build the input line with magnifying glass icon and ghost text
+    let display_text = if input.is_empty() {
+        "🔍 Enter search query (regex supported)"
+    } else {
+        input
+    };
 
-    // Render prompt
-    let prompt = Paragraph::new("Search: ").style(Style::default().fg(Color::White));
-    frame.render_widget(prompt, chunks[0]);
-
-    // Render input
-    let input_text = Paragraph::new(input).style(
+    let input_style = if input.is_empty() {
+        Style::default().fg(Color::DarkGray)
+    } else {
         Style::default()
             .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    );
-    frame.render_widget(input_text, chunks[1]);
+            .add_modifier(Modifier::BOLD)
+    };
 
-    // Render error or hint
-    if let Some(err) = error {
-        let error_text = Paragraph::new(err)
-            .style(Style::default().fg(Color::Red))
-            .wrap(Wrap { trim: true });
-        frame.render_widget(error_text, chunks[2]);
-    } else if input.is_empty() {
-        let hint = Paragraph::new("Enter search query (regex supported)")
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(hint, chunks[2]);
-    }
-}
+    // Create input paragraph with icon
+    let input_paragraph = if input.is_empty() {
+        Paragraph::new(display_text).style(input_style)
+    } else {
+        Paragraph::new(format!("🔍 {}", input)).style(input_style)
+    };
 
-/// Create a centered rect using a percentage of the available space
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(area);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
+    frame.render_widget(input_paragraph, inner);
 }
