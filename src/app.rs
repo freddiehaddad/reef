@@ -260,19 +260,16 @@ impl AppState {
                 if let Some(chapter_idx) = selected_id
                     .strip_prefix("chapter_")
                     .and_then(|s| s.parse::<usize>().ok())
-                {
-                    if let Some(chapter) =
+                    && let Some(chapter) =
                         self.book.as_ref().and_then(|b| b.chapters.get(chapter_idx))
-                    {
-                        if !chapter.sections.is_empty() {
-                            // Toggle expansion state in our tracking
-                            // If currently expanded, it will collapse; if collapsed, it will expand
-                            if self.toc_expanded_chapters.contains(selected_id) {
-                                self.toc_expanded_chapters.remove(selected_id);
-                            } else {
-                                self.toc_expanded_chapters.insert(selected_id.clone());
-                            }
-                        }
+                    && !chapter.sections.is_empty()
+                {
+                    // Toggle expansion state in our tracking
+                    // If currently expanded, it will collapse; if collapsed, it will expand
+                    if self.toc_expanded_chapters.contains(selected_id) {
+                        self.toc_expanded_chapters.remove(selected_id);
+                    } else {
+                        self.toc_expanded_chapters.insert(selected_id.clone());
                     }
                 }
             }
@@ -649,35 +646,35 @@ impl AppState {
     }
 
     pub fn jump_to_selected_bookmark(&mut self) {
-        if let Some(idx) = self.selected_bookmark_idx {
-            if let Some(bookmark) = self.bookmarks.get(idx) {
-                self.current_chapter = bookmark.chapter_idx;
-                self.cursor_line = bookmark.line;
+        if let Some(idx) = self.selected_bookmark_idx
+            && let Some(bookmark) = self.bookmarks.get(idx)
+        {
+            self.current_chapter = bookmark.chapter_idx;
+            self.cursor_line = bookmark.line;
 
-                // Center the line in viewport
-                let half_viewport = self.viewport.height as usize / 2;
-                self.viewport.scroll_offset = bookmark.line.saturating_sub(half_viewport);
+            // Center the line in viewport
+            let half_viewport = self.viewport.height as usize / 2;
+            self.viewport.scroll_offset = bookmark.line.saturating_sub(half_viewport);
 
-                // Sync TOC
-                self.sync_toc_to_cursor();
-            }
+            // Sync TOC
+            self.sync_toc_to_cursor();
         }
     }
 
     pub fn delete_selected_bookmark(&mut self) {
-        if let Some(idx) = self.selected_bookmark_idx {
-            if idx < self.bookmarks.len() {
-                self.bookmarks.remove(idx);
+        if let Some(idx) = self.selected_bookmark_idx
+            && idx < self.bookmarks.len()
+        {
+            self.bookmarks.remove(idx);
 
-                // Update selection
-                if self.bookmarks.is_empty() {
-                    self.selected_bookmark_idx = None;
-                } else if idx >= self.bookmarks.len() {
-                    // Was at last bookmark, move to previous
-                    self.selected_bookmark_idx = Some(self.bookmarks.len() - 1);
-                }
-                // Otherwise, keep same index (moves to next bookmark)
+            // Update selection
+            if self.bookmarks.is_empty() {
+                self.selected_bookmark_idx = None;
+            } else if idx >= self.bookmarks.len() {
+                // Was at last bookmark, move to previous
+                self.selected_bookmark_idx = Some(self.bookmarks.len() - 1);
             }
+            // Otherwise, keep same index (moves to next bookmark)
         }
     }
 

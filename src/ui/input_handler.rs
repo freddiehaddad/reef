@@ -196,30 +196,29 @@ impl InputHandler {
                 }
             }
             KeyCode::Enter => {
-                if let Some(idx) = app.book_picker_selected_idx {
-                    if let Some(book_path) = app.recent_books.get(idx).cloned() {
-                        // Load the selected book
-                        match app.load_book_with_path(book_path.clone()) {
-                            Ok(_) => {
-                                // Render all chapters
-                                let effective_width = app.effective_max_width();
-                                let viewport_width = app.viewport.width;
-                                if let Some(book) = &mut app.book {
-                                    for chapter in &mut book.chapters {
-                                        crate::epub::render_chapter(
-                                            chapter,
-                                            effective_width,
-                                            viewport_width,
-                                        );
-                                    }
+                if let Some(idx) = app.book_picker_selected_idx
+                    && let Some(book_path) = app.recent_books.get(idx).cloned()
+                {
+                    // Load the selected book
+                    match app.load_book_with_path(book_path.clone()) {
+                        Ok(_) => {
+                            // Render all chapters
+                            let effective_width = app.effective_max_width();
+                            let viewport_width = app.viewport.width;
+                            if let Some(book) = &mut app.book {
+                                for chapter in &mut book.chapters {
+                                    crate::epub::render_chapter(
+                                        chapter,
+                                        effective_width,
+                                        viewport_width,
+                                    );
                                 }
-                                app.ui_mode = UiMode::Normal;
-                                app.focus = FocusTarget::Content;
                             }
-                            Err(e) => {
-                                app.ui_mode =
-                                    UiMode::ErrorPopup(format!("Failed to load book: {}", e));
-                            }
+                            app.ui_mode = UiMode::Normal;
+                            app.focus = FocusTarget::Content;
+                        }
+                        Err(e) => {
+                            app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", e));
                         }
                     }
                 }

@@ -1,8 +1,8 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
-    Frame,
 };
 
 pub fn render_book_picker(f: &mut Frame, books: &[String], selected_idx: Option<usize>) {
@@ -22,10 +22,9 @@ pub fn render_book_picker(f: &mut Frame, books: &[String], selected_idx: Option<
     f.render_widget(block, area);
 
     if books.is_empty() {
-        let message =
-            Paragraph::new("No recent books.\n\nOpen a book with: epub-reader <file.epub>")
-                .style(Style::default().fg(Color::Gray))
-                .alignment(ratatui::layout::Alignment::Center);
+        let message = Paragraph::new("No recent books.\n\nOpen a book with: reef <file.epub>")
+            .style(Style::default().fg(Color::Gray))
+            .alignment(ratatui::layout::Alignment::Center);
         f.render_widget(message, inner_area);
     } else {
         // Create list items

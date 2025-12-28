@@ -2,11 +2,11 @@ use crate::app::AppState;
 use crate::types::{FocusTarget, LineStyle, UiMode};
 use crate::ui::widgets;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 use tui_tree_widget::Tree;
 

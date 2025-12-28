@@ -1,10 +1,10 @@
 use crate::types::BookMetadata;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
 pub fn render_metadata_popup(f: &mut Frame, metadata: &BookMetadata) {

@@ -29,8 +29,8 @@ impl PersistenceManager {
     /// Create a new persistence manager
     /// Initializes the config directory if it doesn't exist
     pub fn new() -> Result<Self> {
-        let project_dirs = ProjectDirs::from("", "", "epub-reader")
-            .context("Failed to determine config directory")?;
+        let project_dirs =
+            ProjectDirs::from("", "", "reef").context("Failed to determine config directory")?;
 
         let config_dir = project_dirs.config_dir().to_path_buf();
 

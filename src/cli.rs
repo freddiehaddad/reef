@@ -2,9 +2,9 @@ use crate::constants::{MAX_MAX_WIDTH, MIN_MAX_WIDTH};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "epub-reader")]
+#[command(name = "reef")]
 #[command(version = "0.0.1")]
-#[command(about = "A cross-platform TUI EPUB reader for developers", long_about = None)]
+#[command(about = "Dive into your books from the comfort of your terminal", long_about = None)]
 pub struct Cli {
     /// Path to EPUB file to open
     pub file: Option<String>,

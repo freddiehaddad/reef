@@ -630,37 +630,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "epub-reader"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "crossterm 0.29.0",
- "ctrlc",
- "directories",
- "epub",
- "html5ever",
- "lazy_static",
- "ratatui",
- "regex",
- "scraper",
- "serde",
- "serde_json",
- "syntect",
- "tempfile",
- "termbg",
- "termcolor",
- "textwrap",
- "thiserror",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "tui-tree-widget",
- "zip 7.0.0",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1443,6 +1412,37 @@ dependencies = [
  "getrandom 0.2.16",
  "libredox",
  "thiserror",
+]
+
+[[package]]
+name = "reef"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "crossterm 0.29.0",
+ "ctrlc",
+ "directories",
+ "epub",
+ "html5ever",
+ "lazy_static",
+ "ratatui",
+ "regex",
+ "scraper",
+ "serde",
+ "serde_json",
+ "syntect",
+ "tempfile",
+ "termbg",
+ "termcolor",
+ "textwrap",
+ "thiserror",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "tui-tree-widget",
+ "zip 7.0.0",
 ]
 
 [[package]]

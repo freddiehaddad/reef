@@ -1,8 +1,8 @@
 [package]
-name = "epub-reader"
+name = "reef"
 version = "0.0.1"
-edition = "2021"
-description = "A cross-platform TUI EPUB reader for developers"
+edition = "2024"
+description = "Dive into your ePub books from the comfort of your terminal!"
 license = "MIT"
 
 [dependencies]

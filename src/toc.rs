@@ -96,11 +96,11 @@ impl TocManager {
         expanded_chapters: &mut HashSet<String>,
         item_path: &[String],
     ) {
-        if let Some(chapter_id) = item_path.first() {
-            if !expanded_chapters.contains(chapter_id) {
-                toc_state.tree_state.open(vec![chapter_id.clone()]);
-                expanded_chapters.insert(chapter_id.clone());
-            }
+        if let Some(chapter_id) = item_path.first()
+            && !expanded_chapters.contains(chapter_id)
+        {
+            toc_state.tree_state.open(vec![chapter_id.clone()]);
+            expanded_chapters.insert(chapter_id.clone());
         }
     }
 

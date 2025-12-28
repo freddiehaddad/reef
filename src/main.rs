@@ -18,14 +18,14 @@ use crossterm::{
     cursor::{Hide, Show},
     event::{self, Event, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use error::{AppError, Result};
 use persistence::PersistenceManager;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::EnvFilter;
 use types::{Config, UiMode};
@@ -166,7 +166,7 @@ fn load_initial_book(app: &mut AppState, cli: &Cli) -> Result<()> {
         // No file provided - check if we have recent books
         if app.recent_books.is_empty() {
             return Err(AppError::Other(
-                "No recent books. Usage: epub-reader <file.epub>".to_string(),
+                "No recent books. Usage: reef <file.epub>".to_string(),
             ));
         }
 

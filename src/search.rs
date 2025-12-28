@@ -69,11 +69,11 @@ impl SearchEngine {
 
         // Apply new highlights
         for result in results {
-            if let Some(chapter) = book.chapters.get_mut(result.chapter_idx) {
-                if let Some(line) = chapter.content_lines.get_mut(result.line) {
-                    line.search_matches
-                        .push((result.column, result.column + result.match_length));
-                }
+            if let Some(chapter) = book.chapters.get_mut(result.chapter_idx)
+                && let Some(line) = chapter.content_lines.get_mut(result.line)
+            {
+                line.search_matches
+                    .push((result.column, result.column + result.match_length));
             }
         }
     }
