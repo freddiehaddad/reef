@@ -44,21 +44,77 @@ pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_
                 chapter.sections.push(crate::types::Section {
                     title: heading.text.clone(),
                     start_line: heading.line_number,
+                    fragment_id: heading.id.clone(),
                 });
             }
         }
     } else {
         // Match existing TOC sections to rendered headings
+        tracing::debug!(
+            "Matching {} TOC sections to {} headings",
+            chapter.sections.len(),
+            headings.len()
+        );
+
         for section in &mut chapter.sections {
-            // Try to find matching heading by title (with basic normalization)
-            let normalized_section_title = normalize_text(&section.title);
+            let mut matched = false;
 
-            for heading in &headings {
-                let normalized_heading_text = normalize_text(&heading.text);
+            // First, try to match by fragment ID (most reliable)
+            if let Some(ref section_fragment) = section.fragment_id {
+                tracing::debug!(
+                    "Trying to match section '{}' with fragment_id '{}'",
+                    section.title,
+                    section_fragment
+                );
 
-                if normalized_heading_text == normalized_section_title {
-                    section.start_line = heading.line_number;
-                    break;
+                for heading in &headings {
+                    if let Some(ref heading_id) = heading.id
+                        && heading_id == section_fragment
+                    {
+                        tracing::debug!(
+                            "  ✓ Matched by fragment ID to heading '{}' at line {}",
+                            heading.text,
+                            heading.line_number
+                        );
+                        section.start_line = heading.line_number;
+                        matched = true;
+                        break;
+                    }
+                }
+
+                if !matched {
+                    tracing::debug!("  ✗ No fragment ID match found");
+                }
+            }
+
+            // If no fragment ID match, fall back to title matching
+            if !matched {
+                let normalized_section_title = normalize_text(&section.title);
+                tracing::debug!(
+                    "Trying to match section '{}' by title (normalized: '{}')",
+                    section.title,
+                    normalized_section_title
+                );
+
+                for heading in &headings {
+                    let normalized_heading_text = normalize_text(&heading.text);
+
+                    if normalized_heading_text == normalized_section_title {
+                        tracing::debug!(
+                            "  ✓ Matched by title to heading '{}' at line {}",
+                            heading.text,
+                            heading.line_number
+                        );
+                        section.start_line = heading.line_number;
+                        matched = true;
+                        break;
+                    }
+                }
+
+                if !matched {
+                    tracing::debug!(
+                        "  ✗ No title match found, section will remain at start_line 0"
+                    );
                 }
             }
         }
@@ -82,6 +138,7 @@ struct HeadingInfo {
     text: String,
     level: u8,
     line_number: usize,
+    id: Option<String>,
 }
 
 fn extract_and_render(html: &Html, width: usize) -> (Vec<RenderedLine>, Vec<HeadingInfo>) {
@@ -199,10 +256,12 @@ fn process_heading(
 ) {
     let text = get_text_content(element);
     let start_line = lines.len();
+    let id = element.value().attr("id").map(|s| s.to_string());
     headings.push(HeadingInfo {
         text: text.clone(),
         level,
         line_number: start_line,
+        id,
     });
     add_text_lines(lines, &text, width, style);
     add_blank_line(lines);

@@ -25,6 +25,8 @@ pub struct Section {
     pub title: String,
     /// Line number where this section starts in rendered content
     pub start_line: usize,
+    /// Fragment identifier from EPUB TOC (e.g., "lexical-analysis" from "ch003.xhtml#lexical-analysis")
+    pub fragment_id: Option<String>,
 }
 
 /// Manages table of contents tree state for the UI

@@ -164,10 +164,12 @@ mod tests {
                         Section {
                             title: "Section 1.1".to_string(),
                             start_line: 10,
+                            fragment_id: None,
                         },
                         Section {
                             title: "Section 1.2".to_string(),
                             start_line: 50,
+                            fragment_id: None,
                         },
                     ],
                     content_lines: vec![],

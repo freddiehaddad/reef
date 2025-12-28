@@ -13,6 +13,7 @@ struct TocEntry {
 #[derive(Debug, Clone)]
 struct SectionInfo {
     title: String,
+    fragment_id: Option<String>,
 }
 
 /// Parse an EPUB file and extract book structure and content
@@ -98,6 +99,7 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
             .map(|s| Section {
                 title: s.title.clone(),
                 start_line: 0,
+                fragment_id: s.fragment_id.clone(),
             })
             .collect();
 
@@ -147,9 +149,10 @@ fn process_nav_point(
     // Extract the content path (this is the resource ID)
     let content_str = nav_point.content.to_string_lossy().to_string();
 
-    // Split by '#' to get base path
+    // Split by '#' to get base path and optional fragment ID
     let parts: Vec<&str> = content_str.splitn(2, '#').collect();
     let base_path = parts[0].to_string();
+    let fragment_id = parts.get(1).map(|s| s.to_string());
 
     // Determine if this is a chapter-level entry or a section
     let is_chapter = parent_base_path.is_none();
@@ -169,6 +172,7 @@ fn process_nav_point(
             // Keep existing title, this entry becomes a section
             entry.sections.push(SectionInfo {
                 title: nav_point.label.clone(),
+                fragment_id: fragment_id.clone(),
             });
         }
     } else if same_file_as_parent {
@@ -176,6 +180,7 @@ fn process_nav_point(
         if let Some(entry) = toc_map.get_mut(&base_path) {
             entry.sections.push(SectionInfo {
                 title: nav_point.label.clone(),
+                fragment_id: fragment_id.clone(),
             });
         }
     } else {

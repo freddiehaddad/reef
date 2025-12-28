@@ -295,20 +295,36 @@ impl AppState {
     }
 
     pub fn toc_select(&mut self) {
-        // Get selected item ID
-        let selected_id = match self.toc_state.tree_state.selected().first() {
+        // Get selected item ID - use LAST element of path for leaf nodes (sections)
+        let selected_id = match self.toc_state.tree_state.selected().last() {
             Some(id) => id.clone(),
             None => return,
         };
 
+        tracing::debug!("TOC select: selected_id = {}", selected_id);
+
         // Parse the ID to determine chapter and optional section
         let (chapter_idx, section_idx) = match TocManager::parse_item_id(&selected_id) {
             Some(parsed) => parsed,
-            None => return,
+            None => {
+                tracing::debug!("TOC select: failed to parse item ID");
+                return;
+            }
         };
+
+        tracing::debug!(
+            "TOC select: chapter_idx = {}, section_idx = {:?}",
+            chapter_idx,
+            section_idx
+        );
 
         // Validate chapter index
         if chapter_idx >= self.total_chapters() {
+            tracing::debug!(
+                "TOC select: invalid chapter index {} >= {}",
+                chapter_idx,
+                self.total_chapters()
+            );
             return;
         }
 
@@ -320,15 +336,30 @@ impl AppState {
                 .book
                 .as_ref()
                 .and_then(|b| b.chapters.get(chapter_idx))
-                .and_then(|ch| ch.sections.get(sec_idx))
-                .map(|s| s.start_line);
+                .and_then(|ch| {
+                    tracing::debug!("TOC select: chapter has {} sections", ch.sections.len());
+                    ch.sections.get(sec_idx)
+                })
+                .map(|s| {
+                    tracing::debug!(
+                        "TOC select: section '{}' has start_line = {}, fragment_id = {:?}",
+                        s.title,
+                        s.start_line,
+                        s.fragment_id
+                    );
+                    s.start_line
+                });
 
             if let Some(start_line) = section_start_line {
+                tracing::debug!("TOC select: jumping to section at line {}", start_line);
                 self.cursor_line = start_line;
                 self.viewport.scroll_offset = start_line;
+            } else {
+                tracing::debug!("TOC select: section not found (sec_idx = {})", sec_idx);
             }
         } else {
             // Jump to chapter start
+            tracing::debug!("TOC select: jumping to chapter start");
             self.cursor_line = 0;
             self.viewport.scroll_offset = 0;
         }
