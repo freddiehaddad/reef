@@ -7,7 +7,14 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 struct TocEntry {
     title: Option<String>,
-    sections: Vec<Section>,
+    sections: Vec<SectionInfo>,
+}
+
+#[derive(Debug, Clone)]
+struct SectionInfo {
+    title: String,
+    #[allow(dead_code)]
+    fragment_id: Option<String>,
 }
 
 pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
@@ -27,6 +34,17 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
 
     // Parse TOC to get chapter and section titles
     let toc = parse_toc(&doc);
+    
+    // Build a mapping from spine ID to file path
+    let mut id_to_path = HashMap::new();
+    for (path, _entry) in &toc {
+        // Extract filename from path (e.g., "EPUB\text/ch003.xhtml" -> "ch003.xhtml")
+        if let Some(filename) = path.rsplit(&['/', '\\'][..]).next() {
+            // Convert filename to potential spine ID (e.g., "ch003.xhtml" -> "ch003_xhtml")
+            let potential_id = filename.replace('.', "_");
+            id_to_path.insert(potential_id, path.clone());
+        }
+    }
 
     // Parse chapters
     let mut chapters = Vec::new();
@@ -40,7 +58,11 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
         
         // Get chapter title from TOC, fallback to generic title
         let spine_id = doc.get_current_id().unwrap_or_default();
-        let title = toc.get(&spine_id)
+        
+        // Map spine ID to file path
+        let file_path = id_to_path.get(&spine_id).map(|s| s.as_str()).unwrap_or(&spine_id);
+        
+        let title = toc.get(file_path)
             .and_then(|entry| entry.title.clone())
             .unwrap_or_else(|| format!("Chapter {}", spine_index + 1));
 
@@ -51,9 +73,15 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
             ))?;
 
         // Extract sections from TOC
-        let sections = toc.get(&spine_id)
+        let toc_sections = toc.get(file_path)
             .map(|entry| entry.sections.clone())
             .unwrap_or_default();
+        
+        // Convert to Section structs (will be matched with headings during rendering)
+        let sections = toc_sections.iter().map(|s| Section {
+            title: s.title.clone(),
+            start_line: 0,
+        }).collect();
 
         chapters.push(Chapter {
             title,
@@ -89,20 +117,66 @@ fn parse_toc(doc: &EpubDoc<std::io::BufReader<std::fs::File>>) -> HashMap<String
     let toc = doc.toc.clone();
     
     for nav_point in toc {
-        // Extract the content path (this is the resource ID)
-        let content_str = nav_point.content.to_string_lossy().to_string();
-        
-        // Remove fragment identifier (#...) from content to get the base path
-        let base_path = content_str.split('#').next().unwrap_or(&content_str).to_string();
-        
-        // Create TOC entry with title
-        let entry = TocEntry {
-            title: Some(nav_point.label.clone()),
-            sections: Vec::new(), // We'll populate sections later if needed
-        };
-        
-        toc_map.insert(base_path, entry);
+        process_nav_point(&nav_point, &mut toc_map, None);
     }
     
     toc_map
+}
+
+fn process_nav_point(
+    nav_point: &epub::doc::NavPoint, 
+    toc_map: &mut HashMap<String, TocEntry>,
+    parent_base_path: Option<String>
+) {
+    // Extract the content path (this is the resource ID)
+    let content_str = nav_point.content.to_string_lossy().to_string();
+    
+    // Split by '#' to get base path and fragment
+    let parts: Vec<&str> = content_str.splitn(2, '#').collect();
+    let base_path = parts[0].to_string();
+    let fragment_id = parts.get(1).map(|s| s.to_string());
+    
+    // Determine if this is a chapter-level entry or a section
+    let is_chapter = parent_base_path.is_none();
+    let same_file_as_parent = parent_base_path.as_ref() == Some(&base_path);
+    
+    if is_chapter {
+        // Top-level entry - create or update chapter entry
+        let entry = toc_map.entry(base_path.clone()).or_insert_with(|| TocEntry {
+            title: Some(nav_point.label.clone()),
+            sections: Vec::new(),
+        });
+        
+        // If there's already a title and we have a fragment, this might be first section
+        if entry.title.is_some() && fragment_id.is_some() {
+            // Keep existing title, this entry becomes a section
+            entry.sections.push(SectionInfo {
+                title: nav_point.label.clone(),
+                fragment_id: fragment_id.clone(),
+            });
+        }
+    } else if same_file_as_parent {
+        // This is a section within the parent chapter
+        if let Some(entry) = toc_map.get_mut(&base_path) {
+            entry.sections.push(SectionInfo {
+                title: nav_point.label.clone(),
+                fragment_id: fragment_id.clone(),
+            });
+        }
+    } else {
+        // Different file - treat as new chapter
+        let entry = toc_map.entry(base_path.clone()).or_insert_with(|| TocEntry {
+            title: Some(nav_point.label.clone()),
+            sections: Vec::new(),
+        });
+        
+        if entry.title.is_none() {
+            entry.title = Some(nav_point.label.clone());
+        }
+    }
+    
+    // Recursively process all children - no depth limit!
+    for child in &nav_point.children {
+        process_nav_point(child, toc_map, Some(base_path.clone()));
+    }
 }
