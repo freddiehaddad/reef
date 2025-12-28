@@ -1,8 +1,8 @@
+use ratatui::style::Color;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
-use ratatui::style::Color;
 
 pub struct CodeHighlighter {
     syntax_set: SyntaxSet,
@@ -38,7 +38,10 @@ impl CodeHighlighter {
         };
 
         // Get theme
-        let theme = self.theme_set.themes.get(&self.theme_name)
+        let theme = self
+            .theme_set
+            .themes
+            .get(&self.theme_name)
             .or_else(|| self.theme_set.themes.get("base16-ocean.dark"))
             .expect("Failed to load theme");
 
@@ -56,6 +59,12 @@ impl CodeHighlighter {
         }
 
         result
+    }
+}
+
+impl Default for CodeHighlighter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

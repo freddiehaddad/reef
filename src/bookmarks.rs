@@ -20,44 +20,40 @@ impl BookmarkManager {
         if trimmed_label.is_empty() {
             return Err("Bookmark label cannot be empty".to_string());
         }
-        
+
         if trimmed_label.len() > MAX_LABEL_LENGTH {
             return Err(format!(
                 "Bookmark label too long (max {} characters)",
                 MAX_LABEL_LENGTH
             ));
         }
-        
+
         // Check bookmark limit
         if bookmarks.len() >= MAX_BOOKMARKS {
             return Err(format!("Maximum bookmarks ({}) reached", MAX_BOOKMARKS));
         }
-        
+
         // Create and add bookmark
         let bookmark = Bookmark {
             chapter_idx,
             line,
             label: trimmed_label.to_string(),
         };
-        
+
         bookmarks.push(bookmark);
-        
+
         // Sort bookmarks by position (chapter, then line)
-        bookmarks.sort_by(|a, b| {
-            a.chapter_idx
-                .cmp(&b.chapter_idx)
-                .then(a.line.cmp(&b.line))
-        });
-        
+        bookmarks.sort_by(|a, b| a.chapter_idx.cmp(&b.chapter_idx).then(a.line.cmp(&b.line)));
+
         Ok(())
     }
-    
+
     /// Generate auto-suggested label from current line text
     /// Returns first 50 characters of the line, with newlines stripped
     /// Returns None if the line is empty
     pub fn generate_label_suggestion(line_text: &str, chapter_title: &str) -> Option<String> {
         let trimmed = line_text.trim();
-        
+
         if trimmed.is_empty() {
             // If line is empty, try chapter title
             let chapter_trimmed = chapter_title.trim();
@@ -70,7 +66,7 @@ impl BookmarkManager {
             Some(Self::truncate_label(trimmed, 50))
         }
     }
-    
+
     /// Truncate label to maximum length with "..." suffix if needed
     fn truncate_label(text: &str, max_len: usize) -> String {
         // Remove newlines first
@@ -78,36 +74,14 @@ impl BookmarkManager {
             .chars()
             .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
             .collect();
-        
+
         let trimmed = single_line.trim();
-        
+
         if trimmed.len() <= max_len {
             trimmed.to_string()
         } else {
             format!("{}...", &trimmed[..max_len.saturating_sub(3)])
         }
-    }
-    
-    /// Delete bookmark at index
-    /// Returns the deleted bookmark if successful
-    pub fn delete_bookmark(bookmarks: &mut Vec<Bookmark>, index: usize) -> Option<Bookmark> {
-        if index < bookmarks.len() {
-            Some(bookmarks.remove(index))
-        } else {
-            None
-        }
-    }
-    
-    /// Find bookmark index for a specific chapter and line
-    /// Returns None if no bookmark found at that position
-    pub fn find_bookmark_at_position(
-        bookmarks: &[Bookmark],
-        chapter_idx: usize,
-        line: usize,
-    ) -> Option<usize> {
-        bookmarks
-            .iter()
-            .position(|b| b.chapter_idx == chapter_idx && b.line == line)
     }
 }
 
@@ -118,12 +92,8 @@ mod tests {
     #[test]
     fn test_add_bookmark() {
         let mut bookmarks = Vec::new();
-        let result = BookmarkManager::add_bookmark(
-            &mut bookmarks,
-            0,
-            10,
-            "Test bookmark".to_string(),
-        );
+        let result =
+            BookmarkManager::add_bookmark(&mut bookmarks, 0, 10, "Test bookmark".to_string());
         assert!(result.is_ok());
         assert_eq!(bookmarks.len(), 1);
         assert_eq!(bookmarks[0].label, "Test bookmark");
@@ -174,49 +144,5 @@ mod tests {
     fn test_generate_label_empty() {
         let suggestion = BookmarkManager::generate_label_suggestion("", "");
         assert_eq!(suggestion, None);
-    }
-
-    #[test]
-    fn test_delete_bookmark() {
-        let mut bookmarks = vec![
-            Bookmark {
-                chapter_idx: 0,
-                line: 10,
-                label: "First".to_string(),
-            },
-            Bookmark {
-                chapter_idx: 1,
-                line: 20,
-                label: "Second".to_string(),
-            },
-        ];
-
-        let deleted = BookmarkManager::delete_bookmark(&mut bookmarks, 0);
-        assert!(deleted.is_some());
-        assert_eq!(deleted.unwrap().label, "First");
-        assert_eq!(bookmarks.len(), 1);
-        assert_eq!(bookmarks[0].label, "Second");
-    }
-
-    #[test]
-    fn test_find_bookmark_at_position() {
-        let bookmarks = vec![
-            Bookmark {
-                chapter_idx: 0,
-                line: 10,
-                label: "First".to_string(),
-            },
-            Bookmark {
-                chapter_idx: 1,
-                line: 20,
-                label: "Second".to_string(),
-            },
-        ];
-
-        let found = BookmarkManager::find_bookmark_at_position(&bookmarks, 1, 20);
-        assert_eq!(found, Some(1));
-
-        let not_found = BookmarkManager::find_bookmark_at_position(&bookmarks, 2, 30);
-        assert_eq!(not_found, None);
     }
 }

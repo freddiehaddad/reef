@@ -1,5 +1,3 @@
-
-
 #[derive(Debug, Clone)]
 pub struct Book {
     pub metadata: BookMetadata,
@@ -35,6 +33,12 @@ impl TocState {
     }
 }
 
+impl Default for TocState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Clone for TocState {
     fn clone(&self) -> Self {
         TocState {
@@ -66,7 +70,6 @@ pub enum LineStyle {
     Heading2,
     Heading3,
     CodeBlock { language: Option<String> },
-    InlineCode,
     Quote,
     Link,
 }
@@ -90,7 +93,7 @@ pub struct Viewport {
 #[derive(Debug, Clone, PartialEq)]
 pub enum FocusTarget {
     Content,
-    TOC,
+    Toc,
     Bookmarks,
 }
 
@@ -117,8 +120,6 @@ pub struct SearchMatch {
     pub line: usize,
     pub column: usize,
     pub match_length: usize,
-    pub context: String,
-    pub match_text: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

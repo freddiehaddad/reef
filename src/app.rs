@@ -1,5 +1,7 @@
-use crate::types::{Book, Bookmark, Config, FocusTarget, SearchMatch, TocState, UiMode, Viewport, ZenModeState};
 use crate::persistence::{PersistenceManager, ReadingProgress};
+use crate::types::{
+    Book, Bookmark, Config, FocusTarget, SearchMatch, TocState, UiMode, Viewport, ZenModeState,
+};
 use std::collections::{HashMap, HashSet};
 
 pub struct AppState {
@@ -10,14 +12,14 @@ pub struct AppState {
     pub focus: FocusTarget,
     pub config: Config,
     pub should_quit: bool,
-    
+
     // Max width can be temporarily overridden by CLI (not persisted)
     pub cli_max_width_override: Option<usize>,
-    
+
     // UI Mode
     pub ui_mode: UiMode,
     pub previous_focus: Option<FocusTarget>,
-    
+
     // Panels
     pub toc_panel_visible: bool,
     pub toc_state: TocState,
@@ -26,20 +28,20 @@ pub struct AppState {
     pub selected_bookmark_idx: Option<usize>,
     pub titlebar_visible: bool,
     pub statusbar_visible: bool,
-    
+
     // Zen Mode
     pub zen_mode_active: bool,
     pub pre_zen_state: Option<ZenModeState>,
-    
+
     // Search
     pub search_query: String,
     pub search_results: Vec<SearchMatch>,
     pub current_search_idx: usize,
     pub input_buffer: String,
-    
+
     // Bookmarks
     pub bookmarks: Vec<Bookmark>,
-    
+
     // Persistence
     pub persistence: PersistenceManager,
     pub reading_progress: HashMap<String, ReadingProgress>,
@@ -52,7 +54,7 @@ impl AppState {
     pub fn new(config: Config, persistence: PersistenceManager) -> Self {
         let reading_progress = persistence.load_reading_progress().unwrap_or_default();
         let recent_books = persistence.load_recent_books().unwrap_or_default();
-        
+
         AppState {
             book: None,
             viewport: Viewport {
@@ -90,27 +92,14 @@ impl AppState {
         }
     }
 
-    pub fn load_book(&mut self, book: Book) {
-        // Build TOC tree before storing the book
-        self.build_toc_tree(&book);
-        
-        self.book = Some(book);
-        self.current_chapter = 0;
-        self.cursor_line = 0;
-        self.viewport.scroll_offset = 0;
-        
-        // Sync TOC to initial position
-        self.sync_toc_to_cursor();
-    }
-
     fn build_toc_tree(&mut self, book: &Book) {
         use tui_tree_widget::TreeItem;
-        
+
         let mut items = Vec::new();
-        
+
         for (chapter_idx, chapter) in book.chapters.iter().enumerate() {
             let chapter_id = format!("chapter_{}", chapter_idx);
-            
+
             if chapter.sections.is_empty() {
                 // Chapter with no sections
                 items.push(TreeItem::new_leaf(chapter_id, chapter.title.clone()));
@@ -121,57 +110,59 @@ impl AppState {
                     let section_id = format!("chapter_{}_section_{}", chapter_idx, section_idx);
                     section_items.push(TreeItem::new_leaf(section_id, section.title.clone()));
                 }
-                items.push(TreeItem::new(chapter_id, chapter.title.clone(), section_items).expect("Failed to create tree item"));
+                items.push(
+                    TreeItem::new(chapter_id, chapter.title.clone(), section_items)
+                        .expect("Failed to create tree item"),
+                );
             }
         }
-        
+
         self.toc_state.items = items;
         // Don't select first here - let sync_toc_to_cursor handle it
     }
 
     pub fn toggle_toc(&mut self) {
         self.toc_panel_visible = !self.toc_panel_visible;
-        
+
         // If opening TOC panel, sync selection to current position
         if self.toc_panel_visible {
             self.sync_toc_to_cursor();
         }
-        
+
         // If closing TOC panel while it has focus, move focus back to Content
-        if !self.toc_panel_visible && self.focus == FocusTarget::TOC {
+        if !self.toc_panel_visible && self.focus == FocusTarget::Toc {
             self.focus = FocusTarget::Content;
         }
-        
+
         // Re-render chapters to account for changed available width
         self.rerender_chapters();
     }
 
     pub fn toggle_bookmarks(&mut self) {
         self.bookmarks_panel_visible = !self.bookmarks_panel_visible;
-        
+
         // If closing bookmarks panel while it has focus, move focus back to Content
         if !self.bookmarks_panel_visible && self.focus == FocusTarget::Bookmarks {
             self.focus = FocusTarget::Content;
         }
-        
+
         // Re-render chapters to account for changed available width
         self.rerender_chapters();
     }
 
-    pub fn toggle_titlebar(&mut self) {
-        self.titlebar_visible = !self.titlebar_visible;
-        
-        // Update viewport height
+    fn update_viewport_from_terminal(&mut self) {
         let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
         self.update_viewport_size(width, height);
     }
 
+    pub fn toggle_titlebar(&mut self) {
+        self.titlebar_visible = !self.titlebar_visible;
+        self.update_viewport_from_terminal();
+    }
+
     pub fn toggle_statusbar(&mut self) {
         self.statusbar_visible = !self.statusbar_visible;
-        
-        // Update viewport height
-        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
-        self.update_viewport_size(width, height);
+        self.update_viewport_from_terminal();
     }
 
     pub fn toggle_zen_mode(&mut self) {
@@ -193,7 +184,7 @@ impl AppState {
                 statusbar_visible: self.statusbar_visible,
                 titlebar_visible: self.titlebar_visible,
             });
-            
+
             // Hide everything
             self.toc_panel_visible = false;
             self.bookmarks_panel_visible = false;
@@ -201,10 +192,9 @@ impl AppState {
             self.titlebar_visible = false;
             self.zen_mode_active = true;
         }
-        
+
         // Update viewport height
-        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
-        self.update_viewport_size(width, height);
+        self.update_viewport_from_terminal();
     }
 
     /// Synchronize TOC selection to match current cursor position
@@ -222,7 +212,9 @@ impl AppState {
                 // Find which section contains the cursor
                 let mut current_section_idx = None;
                 for (idx, section) in chapter.sections.iter().enumerate() {
-                    let next_start = chapter.sections.get(idx + 1)
+                    let next_start = chapter
+                        .sections
+                        .get(idx + 1)
                         .map(|s| s.start_line)
                         .unwrap_or(usize::MAX);
                     if section.start_line <= self.cursor_line && self.cursor_line < next_start {
@@ -258,7 +250,9 @@ impl AppState {
         // Use a vector with both parent and child if it's a section
         if target_id.contains("_section_") {
             if let Some(parent_id) = target_id.split("_section_").next() {
-                self.toc_state.tree_state.select(vec![parent_id.to_string(), target_id]);
+                self.toc_state
+                    .tree_state
+                    .select(vec![parent_id.to_string(), target_id]);
             }
         } else {
             self.toc_state.tree_state.select(vec![target_id]);
@@ -270,14 +264,14 @@ impl AppState {
         self.focus = match self.focus {
             FocusTarget::Content => {
                 if self.toc_panel_visible {
-                    FocusTarget::TOC
+                    FocusTarget::Toc
                 } else if self.bookmarks_panel_visible {
                     FocusTarget::Bookmarks
                 } else {
                     FocusTarget::Content
                 }
             }
-            FocusTarget::TOC => {
+            FocusTarget::Toc => {
                 if self.bookmarks_panel_visible {
                     FocusTarget::Bookmarks
                 } else {
@@ -290,7 +284,7 @@ impl AppState {
 
     pub fn focus_toc(&mut self) {
         if self.toc_panel_visible {
-            self.focus = FocusTarget::TOC;
+            self.focus = FocusTarget::Toc;
         }
     }
 
@@ -318,11 +312,12 @@ impl AppState {
             // Check if this is a chapter (not a section) and has sections (is expandable)
             if selected_id.starts_with("chapter_") && !selected_id.contains("_section_") {
                 // Check if chapter has sections by extracting chapter index
-                if let Some(chapter_idx) = selected_id.strip_prefix("chapter_")
+                if let Some(chapter_idx) = selected_id
+                    .strip_prefix("chapter_")
                     .and_then(|s| s.parse::<usize>().ok())
                 {
-                    if let Some(chapter) = self.book.as_ref()
-                        .and_then(|b| b.chapters.get(chapter_idx))
+                    if let Some(chapter) =
+                        self.book.as_ref().and_then(|b| b.chapters.get(chapter_idx))
                     {
                         if !chapter.sections.is_empty() {
                             // Toggle expansion state in our tracking
@@ -337,7 +332,7 @@ impl AppState {
                 }
             }
         }
-        
+
         self.toc_state.tree_state.toggle_selected();
     }
 
@@ -346,7 +341,7 @@ impl AppState {
             let selected_id = selected.clone();
             let selected_vec = vec![selected_id.clone()];
             self.toc_state.tree_state.close(&selected_vec);
-            
+
             // Track collapse in our state
             self.toc_expanded_chapters.remove(&selected_id);
         }
@@ -369,19 +364,20 @@ impl AppState {
                     }
                 } else if parts.len() == 4 && parts[2] == "section" {
                     // Section ID: "chapter_0_section_1"
-                    if let (Ok(chapter_idx), Ok(section_idx)) = (
-                        parts[1].parse::<usize>(),
-                        parts[3].parse::<usize>(),
-                    ) {
+                    if let (Ok(chapter_idx), Ok(section_idx)) =
+                        (parts[1].parse::<usize>(), parts[3].parse::<usize>())
+                    {
                         if chapter_idx < self.total_chapters() {
                             self.current_chapter = chapter_idx;
-                            
+
                             // Get section start_line before borrowing self mutably
-                            let section_start_line = self.book.as_ref()
+                            let section_start_line = self
+                                .book
+                                .as_ref()
                                 .and_then(|b| b.chapters.get(chapter_idx))
                                 .and_then(|ch| ch.sections.get(section_idx))
                                 .map(|s| s.start_line);
-                                
+
                             if let Some(start_line) = section_start_line {
                                 self.cursor_line = start_line;
                                 self.viewport.scroll_offset = start_line;
@@ -394,13 +390,9 @@ impl AppState {
     }
 
     pub fn get_current_chapter(&self) -> Option<&crate::types::Chapter> {
-        self.book.as_ref()
+        self.book
+            .as_ref()
             .and_then(|b| b.chapters.get(self.current_chapter))
-    }
-
-    pub fn get_current_chapter_mut(&mut self) -> Option<&mut crate::types::Chapter> {
-        self.book.as_mut()
-            .and_then(|b| b.chapters.get_mut(self.current_chapter))
     }
 
     pub fn total_chapters(&self) -> usize {
@@ -421,10 +413,10 @@ impl AppState {
 
         let max_scroll = max_lines.saturating_sub(self.viewport.height as usize);
         self.viewport.scroll_offset = (self.viewport.scroll_offset + lines).min(max_scroll);
-        
+
         // Cursor follows viewport
         self.clamp_cursor_to_viewport();
-        
+
         // Sync TOC if visible (to update highlighting as we scroll through sections)
         if self.toc_panel_visible {
             self.sync_toc_to_cursor();
@@ -433,10 +425,10 @@ impl AppState {
 
     pub fn scroll_up(&mut self, lines: usize) {
         self.viewport.scroll_offset = self.viewport.scroll_offset.saturating_sub(lines);
-        
+
         // Cursor follows viewport
         self.clamp_cursor_to_viewport();
-        
+
         // Sync TOC if visible (to update highlighting as we scroll through sections)
         if self.toc_panel_visible {
             self.sync_toc_to_cursor();
@@ -467,7 +459,7 @@ impl AppState {
     pub fn move_cursor_to_chapter_end(&mut self) {
         let max_line = self.current_chapter_lines().saturating_sub(1);
         self.cursor_line = max_line;
-        
+
         // Scroll to show the end
         let viewport_height = self.viewport.height as usize;
         if max_line >= viewport_height {
@@ -480,11 +472,11 @@ impl AppState {
         if total == 0 {
             return;
         }
-        
+
         self.current_chapter = (self.current_chapter + 1) % total;
         self.cursor_line = 0;
         self.viewport.scroll_offset = 0;
-        
+
         // Sync TOC to new position
         self.sync_toc_to_cursor();
     }
@@ -494,16 +486,16 @@ impl AppState {
         if total == 0 {
             return;
         }
-        
+
         if self.current_chapter == 0 {
             self.current_chapter = total - 1;
         } else {
             self.current_chapter -= 1;
         }
-        
+
         self.cursor_line = 0;
         self.viewport.scroll_offset = 0;
-        
+
         // Sync TOC to new position
         self.sync_toc_to_cursor();
     }
@@ -517,9 +509,11 @@ impl AppState {
             }
 
             // Find current section
-            let current_section_idx = chapter.sections.iter().position(|s| {
-                s.start_line > self.cursor_line
-            }).unwrap_or(chapter.sections.len());
+            let current_section_idx = chapter
+                .sections
+                .iter()
+                .position(|s| s.start_line > self.cursor_line)
+                .unwrap_or(chapter.sections.len());
 
             if current_section_idx < chapter.sections.len() {
                 // Jump to next section in current chapter
@@ -532,7 +526,7 @@ impl AppState {
                 return; // next_chapter already syncs TOC
             }
         }
-        
+
         // Sync TOC to new position
         self.sync_toc_to_cursor();
     }
@@ -549,7 +543,9 @@ impl AppState {
             let mut current_section_idx = None;
             for (idx, section) in chapter.sections.iter().enumerate() {
                 if section.start_line <= self.cursor_line {
-                    let next_start = chapter.sections.get(idx + 1)
+                    let next_start = chapter
+                        .sections
+                        .get(idx + 1)
                         .map(|s| s.start_line)
                         .unwrap_or(usize::MAX);
                     if self.cursor_line < next_start {
@@ -578,7 +574,7 @@ impl AppState {
                 }
             }
         }
-        
+
         // Sync TOC to new position
         self.sync_toc_to_cursor();
     }
@@ -607,14 +603,14 @@ impl AppState {
         let max_line = self.current_chapter_lines().saturating_sub(1);
         let viewport_start = self.viewport.scroll_offset;
         let viewport_end = self.viewport.scroll_offset + self.viewport.height as usize - 1;
-        
+
         // Keep cursor within current viewport
         if self.cursor_line < viewport_start {
             self.cursor_line = viewport_start;
         } else if self.cursor_line > viewport_end {
             self.cursor_line = viewport_end.min(max_line);
         }
-        
+
         // Ensure cursor is within valid range
         self.cursor_line = self.cursor_line.min(max_line);
     }
@@ -622,17 +618,16 @@ impl AppState {
     pub fn update_viewport_size(&mut self, width: u16, height: u16) {
         self.viewport.width = width;
         // Reserve space for titlebar and statusbar if visible
-        let reserved_height = 
-            (if self.titlebar_visible { 1 } else { 0 }) +
-            (if self.statusbar_visible { 1 } else { 0 });
+        let reserved_height = (if self.titlebar_visible { 1 } else { 0 })
+            + (if self.statusbar_visible { 1 } else { 0 });
         self.viewport.height = height.saturating_sub(reserved_height);
     }
-    
+
     /// Get the effective max width (CLI override takes precedence over config)
     pub fn effective_max_width(&self) -> Option<usize> {
         self.cli_max_width_override.or(self.config.max_width)
     }
-    
+
     /// Cycle through max width presets: None -> 80 -> 100 -> 120 -> None
     pub fn cycle_max_width(&mut self) {
         let current = self.config.max_width;
@@ -643,36 +638,36 @@ impl AppState {
             Some(120) => None,
             Some(_) => None, // Reset unknown values to None
         };
-        
+
         // Re-render chapters with new width
         self.rerender_chapters();
     }
-    
+
     /// Re-render all chapters with current effective width
     /// Call this when max-width changes or panel visibility changes
     fn rerender_chapters(&mut self) {
         // Get effective width before borrowing book mutably
         let effective_width = self.effective_max_width();
-        
+
         // Calculate available content width accounting for panels and margins
         let mut available_width = self.viewport.width;
-        
+
         // Subtract TOC panel width and margin if visible
         if self.toc_panel_visible {
             available_width = available_width.saturating_sub(self.config.toc_panel_width + 1);
         }
-        
+
         // Subtract bookmarks panel width and margin if visible
         if self.bookmarks_panel_visible {
             available_width = available_width.saturating_sub(self.config.bookmarks_panel_width + 1);
         }
-        
+
         // Re-render all chapters with available width if we have a book
         if let Some(book) = &mut self.book {
             for chapter in &mut book.chapters {
                 crate::epub::render_chapter(chapter, effective_width, available_width);
             }
-            
+
             // Re-apply search highlights if there are active results
             if !self.search_results.is_empty() {
                 // Re-run search to recalculate match positions in new line structure
@@ -690,7 +685,7 @@ impl AppState {
         if self.bookmarks.is_empty() {
             return;
         }
-        
+
         let current_idx = self.selected_bookmark_idx.unwrap_or(0);
         let next_idx = (current_idx + 1) % self.bookmarks.len();
         self.selected_bookmark_idx = Some(next_idx);
@@ -700,7 +695,7 @@ impl AppState {
         if self.bookmarks.is_empty() {
             return;
         }
-        
+
         let current_idx = self.selected_bookmark_idx.unwrap_or(0);
         let next_idx = if current_idx == 0 {
             self.bookmarks.len() - 1
@@ -715,11 +710,11 @@ impl AppState {
             if let Some(bookmark) = self.bookmarks.get(idx) {
                 self.current_chapter = bookmark.chapter_idx;
                 self.cursor_line = bookmark.line;
-                
+
                 // Center the line in viewport
                 let half_viewport = self.viewport.height as usize / 2;
                 self.viewport.scroll_offset = bookmark.line.saturating_sub(half_viewport);
-                
+
                 // Sync TOC
                 self.sync_toc_to_cursor();
             }
@@ -730,7 +725,7 @@ impl AppState {
         if let Some(idx) = self.selected_bookmark_idx {
             if idx < self.bookmarks.len() {
                 self.bookmarks.remove(idx);
-                
+
                 // Update selection
                 if self.bookmarks.is_empty() {
                     self.selected_bookmark_idx = None;
@@ -748,7 +743,7 @@ impl AppState {
         if self.search_results.is_empty() {
             return;
         }
-        
+
         self.current_search_idx = (self.current_search_idx + 1) % self.search_results.len();
         self.jump_to_current_search_result();
     }
@@ -757,7 +752,7 @@ impl AppState {
         if self.search_results.is_empty() {
             return;
         }
-        
+
         if self.current_search_idx == 0 {
             self.current_search_idx = self.search_results.len() - 1;
         } else {
@@ -770,11 +765,11 @@ impl AppState {
         if let Some(result) = self.search_results.get(self.current_search_idx) {
             self.current_chapter = result.chapter_idx;
             self.cursor_line = result.line;
-            
+
             // Center the line in viewport
             let half_viewport = self.viewport.height as usize / 2;
             self.viewport.scroll_offset = result.line.saturating_sub(half_viewport);
-            
+
             // Sync TOC
             self.sync_toc_to_cursor();
         }
@@ -791,64 +786,71 @@ impl AppState {
                 last_read: chrono::Utc::now(),
                 toc_expansion_state: self.get_toc_expansion_state(),
             };
-            
+
             self.reading_progress.insert(book_path.clone(), progress);
-            
+
             // Save bookmarks for current book
-            self.persistence.save_bookmarks(book_path, &self.bookmarks)?;
+            self.persistence
+                .save_bookmarks(book_path, &self.bookmarks)?;
         }
-        
+
         // Save reading progress
-        self.persistence.save_reading_progress(&self.reading_progress)?;
-        
+        self.persistence
+            .save_reading_progress(&self.reading_progress)?;
+
         // Save recent books
         self.persistence.save_recent_books(&self.recent_books)?;
-        
+
         // Save config
         self.persistence.save_config(&self.config)?;
-        
+
         Ok(())
     }
-    
+
     pub fn load_book_with_path(&mut self, book_path: String) -> anyhow::Result<()> {
         use crate::persistence::canonicalize_path;
-        
+
         // Clear search state when switching books
         self.search_query.clear();
         self.search_results.clear();
         self.current_search_idx = 0;
-        
+
         // Canonicalize the path
         let canonical_path = canonicalize_path(&book_path)?;
-        
+
         // Add to recent books (or move to top if already present)
         if let Some(pos) = self.recent_books.iter().position(|p| p == &canonical_path) {
             self.recent_books.remove(pos);
         }
         self.recent_books.insert(0, canonical_path.clone());
-        
+
         // Load the EPUB
         let book = crate::epub::parse_epub(&book_path)?;
-        
+
         // Load bookmarks for this book
-        let bookmarks = self.persistence.load_bookmarks(&canonical_path).unwrap_or_default();
+        let bookmarks = self
+            .persistence
+            .load_bookmarks(&canonical_path)
+            .unwrap_or_default();
         self.bookmarks = bookmarks;
-        
+
         // Load and clone reading progress to avoid borrow issues
         let progress = self.reading_progress.get(&canonical_path).cloned();
-        
+
         // Store current book path
         self.current_book_path = Some(canonical_path);
-        
+
         // Build TOC tree before storing the book
         self.build_toc_tree(&book);
-        
+
         // Restore position if we have progress
         if let Some(progress) = progress {
-            self.current_chapter = progress.chapter_idx.min(book.chapters.len().saturating_sub(1));
+            self.current_chapter = progress
+                .chapter_idx
+                .min(book.chapters.len().saturating_sub(1));
             self.cursor_line = progress.line;
             self.viewport.scroll_offset = progress.scroll_offset;
-            
+
             // Restore TOC expansion state
             self.restore_toc_expansion_state(&progress.toc_expansion_state);
         } else {
@@ -856,24 +858,24 @@ impl AppState {
             self.cursor_line = 0;
             self.viewport.scroll_offset = 0;
         }
-        
+
         self.book = Some(book);
-        
+
         // Sync TOC to restored position
         self.sync_toc_to_cursor();
-        
+
         Ok(())
     }
-    
+
     fn get_toc_expansion_state(&self) -> Vec<String> {
         // Return list of expanded chapter IDs from our tracking
         self.toc_expanded_chapters.iter().cloned().collect()
     }
-    
+
     fn restore_toc_expansion_state(&mut self, state: &[String]) {
         // Clear current tracking
         self.toc_expanded_chapters.clear();
-        
+
         // Expand nodes that were previously expanded and track them
         for id in state {
             self.toc_state.tree_state.open(vec![id.clone()]);

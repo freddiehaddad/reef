@@ -1,7 +1,6 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
@@ -9,19 +8,19 @@ use ratatui::{
 /// Render the search popup
 pub fn render_search_popup(frame: &mut Frame, input: &str, error: Option<&str>) {
     let area = centered_rect(50, 20, frame.area());
-    
+
     // Clear the area
     frame.render_widget(Clear, area);
-    
+
     // Create the popup content
     let block = Block::default()
         .title("Search")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
-    
+
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    
+
     // Layout for search input and error/hint
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -31,17 +30,19 @@ pub fn render_search_popup(frame: &mut Frame, input: &str, error: Option<&str>) 
             Constraint::Min(1),    // Error or hint
         ])
         .split(inner);
-    
+
     // Render prompt
-    let prompt = Paragraph::new("Search: ")
-        .style(Style::default().fg(Color::White));
+    let prompt = Paragraph::new("Search: ").style(Style::default().fg(Color::White));
     frame.render_widget(prompt, chunks[0]);
-    
+
     // Render input
-    let input_text = Paragraph::new(input)
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    let input_text = Paragraph::new(input).style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_widget(input_text, chunks[1]);
-    
+
     // Render error or hint
     if let Some(err) = error {
         let error_text = Paragraph::new(err)

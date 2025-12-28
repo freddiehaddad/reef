@@ -24,7 +24,9 @@ impl<'a> BookmarksPanel<'a> {
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let border_style = if self.focused {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };

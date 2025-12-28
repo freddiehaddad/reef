@@ -8,23 +8,24 @@ use ratatui::{
 pub fn render_book_picker(f: &mut Frame, books: &[String], selected_idx: Option<usize>) {
     // Create a centered popup (60% width, 60% height)
     let area = centered_rect(60, 60, f.area());
-    
+
     // Clear the area behind the popup
     f.render_widget(Clear, area);
-    
+
     // Create the block
     let block = Block::default()
         .title("Recent Books")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
-    
+
     let inner_area = block.inner(area);
     f.render_widget(block, area);
-    
+
     if books.is_empty() {
-        let message = Paragraph::new("No recent books.\n\nOpen a book with: epub-reader <file.epub>")
-            .style(Style::default().fg(Color::Gray))
-            .alignment(ratatui::layout::Alignment::Center);
+        let message =
+            Paragraph::new("No recent books.\n\nOpen a book with: epub-reader <file.epub>")
+                .style(Style::default().fg(Color::Gray))
+                .alignment(ratatui::layout::Alignment::Center);
         f.render_widget(message, inner_area);
     } else {
         // Create list items
@@ -37,7 +38,7 @@ pub fn render_book_picker(f: &mut Frame, books: &[String], selected_idx: Option<
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or(path);
-                
+
                 let is_selected = selected_idx == Some(idx);
                 let style = if is_selected {
                     Style::default()
@@ -47,11 +48,11 @@ pub fn render_book_picker(f: &mut Frame, books: &[String], selected_idx: Option<
                 } else {
                     Style::default()
                 };
-                
+
                 ListItem::new(filename).style(style)
             })
             .collect();
-        
+
         let list = List::new(items);
         f.render_widget(list, inner_area);
     }

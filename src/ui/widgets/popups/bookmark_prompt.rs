@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
@@ -7,21 +7,26 @@ use ratatui::{
 };
 
 /// Render the bookmark prompt popup
-pub fn render_bookmark_prompt(frame: &mut Frame, input: &str, suggestion: Option<&str>, error: Option<&str>) {
+pub fn render_bookmark_prompt(
+    frame: &mut Frame,
+    input: &str,
+    suggestion: Option<&str>,
+    error: Option<&str>,
+) {
     let area = centered_rect(50, 25, frame.area());
-    
+
     // Clear the area
     frame.render_widget(Clear, area);
-    
+
     // Create the popup content
     let block = Block::default()
         .title("Add Bookmark")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
-    
+
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    
+
     // Layout for prompt, input, suggestion, and error
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -33,28 +38,32 @@ pub fn render_bookmark_prompt(frame: &mut Frame, input: &str, suggestion: Option
             Constraint::Min(1),    // Error or hint
         ])
         .split(inner);
-    
+
     // Render prompt
-    let prompt = Paragraph::new("Bookmark label: ")
-        .style(Style::default().fg(Color::White));
+    let prompt = Paragraph::new("Bookmark label: ").style(Style::default().fg(Color::White));
     frame.render_widget(prompt, chunks[0]);
-    
+
     // Render input
-    let input_text = Paragraph::new(input)
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    let input_text = Paragraph::new(input).style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_widget(input_text, chunks[1]);
-    
+
     // Render suggestion if available
     if let Some(sug) = suggestion {
         let suggestion_text = vec![
-            Line::from(Span::styled("Suggestion:", Style::default().fg(Color::DarkGray))),
+            Line::from(Span::styled(
+                "Suggestion:",
+                Style::default().fg(Color::DarkGray),
+            )),
             Line::from(Span::styled(sug, Style::default().fg(Color::Green))),
         ];
-        let suggestion_paragraph = Paragraph::new(suggestion_text)
-            .wrap(Wrap { trim: true });
+        let suggestion_paragraph = Paragraph::new(suggestion_text).wrap(Wrap { trim: true });
         frame.render_widget(suggestion_paragraph, chunks[3]);
     }
-    
+
     // Render error or hint
     if let Some(err) = error {
         let error_text = Paragraph::new(err)
