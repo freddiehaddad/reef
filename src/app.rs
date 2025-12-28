@@ -679,6 +679,10 @@ impl AppState {
             available_width = available_width.saturating_sub(self.config.bookmarks_panel_width + 1);
         }
 
+        // Add back the UI_MARGIN_WIDTH that will be subtracted in render_chapter
+        // This ensures the text wraps to fill the actual available space
+        available_width = available_width.saturating_add(crate::constants::UI_MARGIN_WIDTH as u16);
+
         // Re-render all chapters with available width if we have a book
         if let Some(book) = &mut self.book {
             for chapter in &mut book.chapters {
