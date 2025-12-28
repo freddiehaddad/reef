@@ -15,6 +15,21 @@ struct SectionInfo {
     title: String,
 }
 
+/// Parse an EPUB file and extract book structure and content
+///
+/// # Arguments
+/// * `path` - Path to the .epub file
+///
+/// # Returns
+/// * `Ok(Book)` - Successfully parsed book with metadata and chapters
+/// * `Err(AppError)` - File not found, invalid EPUB, or extraction error
+///
+/// # Example
+/// ```no_run
+/// # use epub_reader::epub::parse_epub;
+/// let book = parse_epub("mybook.epub")?;
+/// # Ok::<(), epub_reader::error::AppError>(())
+/// ```
 pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
     let path_str = path.as_ref().to_string_lossy().to_string();
 

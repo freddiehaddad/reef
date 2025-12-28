@@ -5,12 +5,22 @@ use std::time::{Duration, Instant};
 const MAX_SEARCH_RESULTS: usize = 1000;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Search engine for full-text regex search across EPUB content
 pub struct SearchEngine;
 
 impl SearchEngine {
-    /// Perform full-book search with regex
-    /// Returns up to MAX_SEARCH_RESULTS matches
-    /// Times out after SEARCH_TIMEOUT seconds
+    /// Perform full-book search with regex pattern
+    ///
+    /// Searches through all chapters and lines, collecting up to
+    /// MAX_SEARCH_RESULTS matches or timing out after SEARCH_TIMEOUT.
+    ///
+    /// # Arguments
+    /// * `book` - The book to search through
+    /// * `query` - Regex pattern (supports standard Rust regex syntax)
+    ///
+    /// # Returns
+    /// * `Ok(Vec<SearchMatch>)` - List of matches found
+    /// * `Err(String)` - Invalid regex or search timeout
     pub fn search(book: &Book, query: &str) -> Result<Vec<SearchMatch>, String> {
         // Validate and compile regex
         let regex = Regex::new(query).map_err(|e| format!("Invalid regex pattern: {}", e))?;

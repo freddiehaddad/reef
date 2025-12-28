@@ -1,16 +1,19 @@
 mod app;
 mod bookmarks;
 mod cli;
+mod constants;
 mod epub;
 mod error;
 mod persistence;
 mod search;
+mod toc;
 mod types;
 mod ui;
 
 use app::AppState;
 use clap::Parser;
 use cli::Cli;
+use constants::{MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
 use crossterm::{
     cursor::{Hide, Show},
     event::{self, Event, KeyEventKind},
@@ -49,7 +52,7 @@ fn run() -> Result<()> {
 
     // Check terminal size
     let (width, height) = crossterm::terminal::size()?;
-    if width < 80 || height < 24 {
+    if width < MIN_TERMINAL_WIDTH || height < MIN_TERMINAL_HEIGHT {
         return Err(AppError::TerminalTooSmall);
     }
 

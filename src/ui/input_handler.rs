@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::constants::{MAX_BOOKMARK_INPUT_LENGTH, MAX_SEARCH_INPUT_LENGTH};
 use crate::error::Result;
 use crate::types::{FocusTarget, UiMode};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -6,6 +7,61 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub struct InputHandler;
 
 impl InputHandler {
+    /// Handle common panel toggles and UI controls
+    /// Returns true if the key was handled, false otherwise
+    fn handle_common_controls(app: &mut AppState, key: KeyEvent) -> bool {
+        match key.code {
+            // Quit
+            KeyCode::Char('q') => {
+                app.should_quit = true;
+                true
+            }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.should_quit = true;
+                true
+            }
+            // Panel toggles
+            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.toggle_titlebar();
+                true
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.toggle_statusbar();
+                true
+            }
+            KeyCode::Char('t') => {
+                app.toggle_toc();
+                true
+            }
+            KeyCode::Char('b') => {
+                app.toggle_bookmarks();
+                true
+            }
+            KeyCode::Char('z') => {
+                app.toggle_zen_mode();
+                true
+            }
+            // Focus management
+            KeyCode::Tab => {
+                app.cycle_focus();
+                true
+            }
+            KeyCode::Char('1') => {
+                app.focus_toc();
+                true
+            }
+            KeyCode::Char('2') => {
+                app.focus_content();
+                true
+            }
+            KeyCode::Char('3') => {
+                app.focus_bookmarks();
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn handle_key(&mut self, app: &mut AppState, key: KeyEvent) -> Result<()> {
         // Route input based on UI mode first
         match &app.ui_mode {
@@ -69,7 +125,7 @@ impl InputHandler {
                 app.input_buffer.pop();
             }
             KeyCode::Char(c) => {
-                if app.input_buffer.len() < 500 {
+                if app.input_buffer.len() < MAX_SEARCH_INPUT_LENGTH {
                     app.input_buffer.push(c);
                 }
             }
@@ -105,7 +161,7 @@ impl InputHandler {
                 app.input_buffer.pop();
             }
             KeyCode::Char(c) => {
-                if app.input_buffer.len() < 100 {
+                if app.input_buffer.len() < MAX_BOOKMARK_INPUT_LENGTH {
                     app.input_buffer.push(c);
                 }
             }
@@ -210,16 +266,13 @@ impl InputHandler {
     }
 
     fn handle_bookmarks(app: &mut AppState, key: KeyEvent) -> Result<()> {
-        match key.code {
-            // Quit
-            KeyCode::Char('q') => {
-                app.should_quit = true;
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.should_quit = true;
-            }
+        // Try common controls first
+        if Self::handle_common_controls(app, key) {
+            return Ok(());
+        }
 
-            // Bookmark navigation
+        // Bookmark-specific controls
+        match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 app.bookmark_next();
             }
@@ -232,54 +285,19 @@ impl InputHandler {
             KeyCode::Char('d') => {
                 app.delete_selected_bookmark();
             }
-
-            // Panel toggles
-            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_titlebar();
-            }
-            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_statusbar();
-            }
-            KeyCode::Char('t') => {
-                app.toggle_toc();
-            }
-            KeyCode::Char('b') => {
-                app.toggle_bookmarks();
-            }
-            KeyCode::Char('z') => {
-                app.toggle_zen_mode();
-            }
-
-            // Focus management
-            KeyCode::Tab => {
-                app.cycle_focus();
-            }
-            KeyCode::Char('1') => {
-                app.focus_toc();
-            }
-            KeyCode::Char('2') => {
-                app.focus_content();
-            }
-            KeyCode::Char('3') => {
-                app.focus_bookmarks();
-            }
-
             _ => {}
         }
         Ok(())
     }
 
     fn handle_toc(app: &mut AppState, key: KeyEvent) -> Result<()> {
-        match key.code {
-            // Quit
-            KeyCode::Char('q') => {
-                app.should_quit = true;
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.should_quit = true;
-            }
+        // Try common controls first
+        if Self::handle_common_controls(app, key) {
+            return Ok(());
+        }
 
-            // TOC navigation
+        // TOC-specific controls
+        match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 app.toc_next();
             }
@@ -295,31 +313,12 @@ impl InputHandler {
             KeyCode::Enter => {
                 app.toc_select();
             }
-
-            // Panel toggles
-            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_titlebar();
-            }
-            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_statusbar();
-            }
-            KeyCode::Char('t') => {
-                app.toggle_toc();
-            }
-            KeyCode::Char('b') => {
-                app.toggle_bookmarks();
-            }
-            KeyCode::Char('z') => {
-                app.toggle_zen_mode();
-            }
-
             // Search
             KeyCode::Char('/') => {
                 app.previous_focus = Some(app.focus.clone());
                 app.ui_mode = UiMode::SearchPopup;
                 app.input_buffer.clear();
             }
-
             // Bookmarks
             KeyCode::Char('m') | KeyCode::Char('M')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
@@ -328,27 +327,17 @@ impl InputHandler {
                 app.ui_mode = UiMode::BookmarkPrompt;
                 app.input_buffer.clear();
             }
-
-            // Focus management
-            KeyCode::Tab => {
-                app.cycle_focus();
-            }
-            KeyCode::Char('1') => {
-                app.focus_toc();
-            }
-            KeyCode::Char('2') => {
-                app.focus_content();
-            }
-            KeyCode::Char('3') => {
-                app.focus_bookmarks();
-            }
-
             _ => {}
         }
         Ok(())
     }
 
     fn handle_content(app: &mut AppState, key: KeyEvent) -> Result<()> {
+        // Try common controls first
+        if Self::handle_common_controls(app, key) {
+            return Ok(());
+        }
+
         match key.code {
             // Clear search highlights
             KeyCode::Esc => {
@@ -363,14 +352,6 @@ impl InputHandler {
                     app.search_query.clear();
                     app.current_search_idx = 0;
                 }
-            }
-
-            // Quit
-            KeyCode::Char('q') => {
-                app.should_quit = true;
-            }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.should_quit = true;
             }
 
             // Half page scrolling with Ctrl+arrows (must come before regular arrow keys)
@@ -425,23 +406,6 @@ impl InputHandler {
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.half_page_up();
-            }
-
-            // Panel and UI toggles (Ctrl+t/s must come before 't')
-            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_titlebar();
-            }
-            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.toggle_statusbar();
-            }
-            KeyCode::Char('t') => {
-                app.toggle_toc();
-            }
-            KeyCode::Char('b') => {
-                app.toggle_bookmarks();
-            }
-            KeyCode::Char('z') => {
-                app.toggle_zen_mode();
             }
 
             // Cycle max width
@@ -539,20 +503,6 @@ impl InputHandler {
             }
             KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => {
                 app.next_section();
-            }
-
-            // Focus management
-            KeyCode::Tab => {
-                app.cycle_focus();
-            }
-            KeyCode::Char('1') => {
-                app.focus_toc();
-            }
-            KeyCode::Char('2') => {
-                app.focus_content();
-            }
-            KeyCode::Char('3') => {
-                app.focus_bookmarks();
             }
 
             _ => {}

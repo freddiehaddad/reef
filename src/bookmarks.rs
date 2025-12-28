@@ -3,12 +3,23 @@ use crate::types::Bookmark;
 const MAX_BOOKMARKS: usize = 1000;
 const MAX_LABEL_LENGTH: usize = 100;
 
+/// Utilities for managing user bookmarks
 pub struct BookmarkManager;
 
 impl BookmarkManager {
-    /// Add a new bookmark
-    /// Returns an error if the maximum number of bookmarks has been reached
-    /// or if the label is empty or exceeds the maximum length
+    /// Add a new bookmark to the collection
+    ///
+    /// Bookmarks are automatically sorted by position (chapter, then line).
+    ///
+    /// # Arguments
+    /// * `bookmarks` - Mutable bookmark collection to add to
+    /// * `chapter_idx` - Chapter index where bookmark should be placed
+    /// * `line` - Line number within chapter
+    /// * `label` - User-provided label (will be trimmed)
+    ///
+    /// # Returns
+    /// * `Ok(())` - Bookmark added successfully
+    /// * `Err(String)` - Empty label, too long, or max bookmarks reached
     pub fn add_bookmark(
         bookmarks: &mut Vec<Bookmark>,
         chapter_idx: usize,
@@ -48,9 +59,14 @@ impl BookmarkManager {
         Ok(())
     }
 
-    /// Generate auto-suggested label from current line text
-    /// Returns first 50 characters of the line, with newlines stripped
-    /// Returns None if the line is empty
+    /// Generate an auto-suggested label from current line or chapter
+    ///
+    /// Uses the first 50 characters of the line text. If the line is empty,
+    /// falls back to the chapter title.
+    ///
+    /// # Returns
+    /// * `Some(String)` - Suggested label text
+    /// * `None` - Both line and chapter title are empty
     pub fn generate_label_suggestion(line_text: &str, chapter_title: &str) -> Option<String> {
         let trimmed = line_text.trim();
 

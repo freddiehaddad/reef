@@ -1,10 +1,12 @@
-// Library exports for fuzzing and testing
+// Library exports
 pub mod app;
 pub mod bookmarks;
 pub mod cli;
+pub mod constants;
 pub mod epub;
 pub mod error;
 pub mod persistence;
 pub mod search;
+pub mod toc;
 pub mod types;
 pub mod ui;

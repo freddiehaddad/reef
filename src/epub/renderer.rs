@@ -1,3 +1,4 @@
+use crate::constants::UI_MARGIN_WIDTH;
 use crate::epub::code_highlight::CodeHighlighter;
 use crate::types::{Chapter, LineStyle, RenderedLine};
 use lazy_static::lazy_static;
@@ -8,6 +9,16 @@ lazy_static! {
     static ref CODE_HIGHLIGHTER: CodeHighlighter = CodeHighlighter::new();
 }
 
+/// Render a chapter's HTML content into styled text lines
+///
+/// Converts HTML to wrapped text with appropriate styling for headings,
+/// code blocks, quotes, etc. Updates the chapter's content_lines and
+/// section start_line positions.
+///
+/// # Arguments
+/// * `chapter` - Mutable chapter to render (updates content_lines and section positions)
+/// * `max_width` - Optional maximum line width (None = use terminal width)
+/// * `terminal_width` - Current terminal width in columns
 pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_width: u16) {
     // Determine effective width
     let width = if let Some(max) = max_width {
@@ -16,7 +27,7 @@ pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_
         terminal_width as usize
     };
 
-    let width = width.saturating_sub(4); // Reserve space for margins/UI
+    let width = width.saturating_sub(UI_MARGIN_WIDTH); // Reserve space for margins/UI
 
     // Parse HTML content from the chapter's file
     let html = Html::parse_fragment(&chapter.file_path);

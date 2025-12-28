@@ -1,3 +1,5 @@
+//! EPUB parsing and rendering functionality
+
 pub mod code_highlight;
 pub mod parser;
 pub mod renderer;

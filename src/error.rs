@@ -1,5 +1,7 @@
+use crate::constants::{MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
 use thiserror::Error;
 
+/// Application-level errors
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error("EPUB file not found: {0}")]
@@ -14,7 +16,7 @@ pub enum AppError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("Terminal too small (minimum 80x24)")]
+    #[error("Terminal too small (minimum {MIN_TERMINAL_WIDTH}x{MIN_TERMINAL_HEIGHT})")]
     TerminalTooSmall,
 
     #[error("{0}")]

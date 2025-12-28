@@ -1,3 +1,4 @@
+use crate::constants::{MAX_MAX_WIDTH, MIN_MAX_WIDTH};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -18,13 +19,15 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// Validate CLI arguments
+    /// Returns error if max_width is out of bounds (40-200)
     pub fn validate(&self) -> Result<(), String> {
         if let Some(width) = self.max_width {
-            if width < 40 {
-                return Err("Max width too small (minimum 40)".to_string());
+            if width < MIN_MAX_WIDTH {
+                return Err(format!("Max width too small (minimum {})", MIN_MAX_WIDTH));
             }
-            if width > 200 {
-                return Err("Max width too large (maximum 200)".to_string());
+            if width > MAX_MAX_WIDTH {
+                return Err(format!("Max width too large (maximum {})", MAX_MAX_WIDTH));
             }
         }
         Ok(())
