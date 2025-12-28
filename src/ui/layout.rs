@@ -362,7 +362,36 @@ fn render_statusbar(f: &mut Frame, app: &AppState, area: Rect) {
         "No book loaded".to_string()
     };
 
-    // Append search info if active
+    // Calculate and format width info
+    let width_info = if let Some(max_width) = app.effective_max_width() {
+        // Calculate actual available width accounting for panels (before margin subtraction)
+        let mut available_width = app.viewport.width as usize;
+        if app.toc_panel_visible {
+            available_width =
+                available_width.saturating_sub(app.config.toc_panel_width as usize + 1);
+        }
+        if app.bookmarks_panel_visible {
+            available_width =
+                available_width.saturating_sub(app.config.bookmarks_panel_width as usize + 1);
+        }
+
+        // Check if terminal/panels are constraining the width (before UI margins)
+        // The actual rendering subtracts 4 for margins, but we compare before that
+        if available_width < max_width {
+            // Terminal is too narrow - show both configured and actual
+            let actual_width = available_width.saturating_sub(4);
+            format!(" | Width: {} ({})", max_width, actual_width)
+        } else {
+            // Terminal is wide enough - just show configured width
+            format!(" | Width: {}", max_width)
+        }
+    } else {
+        " | Width: auto".to_string()
+    };
+
+    // Append width info and search info if active
+    let status_with_width = format!("{}{}", status_text, width_info);
+
     let full_status = if !app.search_results.is_empty() {
         let query_display = if app.search_query.len() > 20 {
             format!("{}...", &app.search_query[..17])
@@ -371,13 +400,13 @@ fn render_statusbar(f: &mut Frame, app: &AppState, area: Rect) {
         };
         format!(
             "{} | [Search: '{}' {}/{}]",
-            status_text,
+            status_with_width,
             query_display,
             app.current_search_idx + 1,
             app.search_results.len()
         )
     } else {
-        status_text
+        status_with_width
     };
 
     let status =
