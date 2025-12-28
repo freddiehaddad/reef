@@ -1,5 +1,5 @@
 use crate::app::AppState;
-use crate::types::{FocusTarget, LineStyle, UiMode};
+use crate::types::{FocusTarget, LineStyle, LoadingState, UiMode};
 use crate::ui::widgets;
 use ratatui::{
     Frame,
@@ -136,6 +136,25 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
             widgets::popups::error::render_error_popup(f, message, f.area());
         }
         UiMode::Normal => {}
+    }
+
+    // Render loading overlay if active
+    match &app.loading_state {
+        LoadingState::LoadingBook { file_path } => {
+            let file_name = std::path::Path::new(file_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(file_path);
+
+            let widget = widgets::loading::LoadingWidget::new(format!("Loading {}", file_name));
+            widget.render(f, f.area());
+        }
+        LoadingState::RenderingChapters { rendered, total } => {
+            let widget = widgets::loading::LoadingWidget::new("Rendering chapters")
+                .progress(*rendered, *total);
+            widget.render(f, f.area());
+        }
+        LoadingState::Idle => {}
     }
 }
 

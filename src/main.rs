@@ -1,4 +1,5 @@
 mod app;
+mod async_tasks;
 mod bookmarks;
 mod cli;
 mod constants;
@@ -11,6 +12,7 @@ mod types;
 mod ui;
 
 use app::AppState;
+use async_tasks::{AsyncTaskRunner, TaskMessage};
 use clap::Parser;
 use cli::Cli;
 use constants::{MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
@@ -26,18 +28,21 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::EnvFilter;
-use types::{Config, UiMode};
+use types::{Config, LoadingState, UiMode};
 
-fn main() {
-    if let Err(e) = run() {
+#[tokio::main]
+async fn main() {
+    if let Err(e) = run().await {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<()> {
+async fn run() -> Result<()> {
     // Parse CLI arguments
     let cli = Cli::parse();
 
@@ -68,7 +73,7 @@ fn run() -> Result<()> {
     .map_err(|e| AppError::Other(format!("Failed to set Ctrl-C handler: {}", e)))?;
 
     // Run the application
-    let result = run_app(cli, running);
+    let result = run_app(cli, running).await;
 
     // Cleanup terminal
     cleanup_terminal()?;
@@ -113,19 +118,28 @@ fn init_logging(log_file: &str) -> Result<()> {
     Ok(())
 }
 
-fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
+async fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
     // Create backend and terminal
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
+    // Create task channel
+    let (task_tx, mut task_rx) = mpsc::unbounded_channel();
+
     // Initialize app state
     let mut app = initialize_app_state(&cli)?;
 
+    // Create task runner
+    let task_runner = AsyncTaskRunner::new(task_tx);
+
+    // Create resize debouncer
+    let resize_tx = task_runner.spawn_resize_debouncer(200); // 200ms debounce
+
     // Load initial book or show picker
-    load_initial_book(&mut app, &cli)?;
+    load_initial_book(&mut app, &cli, &task_runner)?;
 
     // Run main event loop
-    run_event_loop(&mut terminal, &mut app, running)?;
+    run_event_loop(&mut terminal, &mut app, &mut task_rx, running, &resize_tx).await?;
 
     // Save state before quitting
     save_app_state(&mut app);
@@ -159,9 +173,18 @@ fn initialize_app_state(cli: &Cli) -> Result<AppState> {
     Ok(app)
 }
 
-fn load_initial_book(app: &mut AppState, cli: &Cli) -> Result<()> {
+fn load_initial_book(app: &mut AppState, cli: &Cli, task_runner: &AsyncTaskRunner) -> Result<()> {
     if let Some(file_path) = &cli.file {
-        load_epub_file(app, file_path)?;
+        // Start async loading
+        let effective_width = app.effective_max_width();
+        let viewport_width = app.viewport.width;
+
+        let (_handle, _join_handle) =
+            task_runner.spawn_load_epub(file_path.clone(), effective_width, viewport_width);
+
+        app.loading_state = LoadingState::LoadingBook {
+            file_path: file_path.clone(),
+        };
     } else {
         // No file provided - check if we have recent books
         if app.recent_books.is_empty() {
@@ -178,80 +201,141 @@ fn load_initial_book(app: &mut AppState, cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-fn load_epub_file(app: &mut AppState, file_path: &str) -> Result<()> {
-    tracing::info!("Loading EPUB: {}", file_path);
-
-    let mut book = epub::parse_epub(file_path)?;
-
-    tracing::info!(
-        "Book loaded: {} ({} chapters)",
-        book.metadata.title,
-        book.chapters.len()
-    );
-
-    // Render all chapters
-    let effective_width = app.effective_max_width();
-    let viewport_width = app.viewport.width;
-    for chapter in &mut book.chapters {
-        epub::render_chapter(chapter, effective_width, viewport_width);
-    }
-
-    // Load book with path (handles persistence)
-    app.load_book_with_path(file_path.to_string())
-        .map_err(|e| AppError::Other(format!("Failed to load book: {}", e)))?;
-
-    // Re-render with actual book content (in case of resize)
-    let effective_width = app.effective_max_width();
-    let viewport_width = app.viewport.width;
-    if let Some(book) = &mut app.book {
-        for chapter in &mut book.chapters {
-            epub::render_chapter(chapter, effective_width, viewport_width);
-        }
-    }
-
-    Ok(())
-}
-
-fn run_event_loop(
+async fn run_event_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut AppState,
+    task_rx: &mut mpsc::UnboundedReceiver<TaskMessage>,
     running: Arc<AtomicBool>,
+    resize_tx: &mpsc::UnboundedSender<(u16, u16)>,
 ) -> Result<()> {
+    // Target 60 FPS = ~16ms per frame
+    let frame_duration = Duration::from_millis(16);
+
     while running.load(Ordering::SeqCst) && !app.should_quit {
-        // Render
+        let frame_start = Instant::now();
+
+        // Process all pending task messages (non-blocking)
+        while let Ok(msg) = task_rx.try_recv() {
+            handle_task_message(app, msg);
+        }
+
+        // Render UI
         terminal.draw(|f| {
             ui::layout::render(f, app);
         })?;
 
-        // Handle input with timeout
-        if event::poll(std::time::Duration::from_millis(100))? {
+        // Poll for input events (non-blocking)
+        if event::poll(Duration::from_millis(0))? {
             let ev = event::read()?;
-            handle_event(app, ev)?;
+            handle_event(app, ev, resize_tx)?;
+        }
+
+        // Sleep to maintain frame rate
+        let elapsed = frame_start.elapsed();
+        if elapsed < frame_duration {
+            tokio::time::sleep(frame_duration - elapsed).await;
         }
     }
 
     Ok(())
 }
 
-fn handle_event(app: &mut AppState, ev: Event) -> Result<()> {
+fn handle_task_message(app: &mut AppState, msg: TaskMessage) {
+    match msg {
+        TaskMessage::BookLoadingStarted { file_path } => {
+            tracing::info!("Book loading started: {}", file_path);
+            app.loading_state = LoadingState::LoadingBook { file_path };
+        }
+
+        TaskMessage::BookLoaded { book, file_path } => {
+            tracing::info!(
+                "Book loaded: {} ({} chapters)",
+                book.metadata.title,
+                book.chapters.len()
+            );
+
+            let total_chapters = book.chapters.len();
+
+            // Load book through normal path (handles persistence)
+            if let Err(e) = app.load_book_with_path(file_path.clone()) {
+                tracing::error!("Failed to load book path: {}", e);
+                app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", e));
+                app.loading_state = LoadingState::Idle;
+                return;
+            }
+
+            // Set the loaded book (with first chapter already rendered)
+            app.book = Some(book);
+
+            // Update loading state
+            app.loading_state = LoadingState::RenderingChapters {
+                rendered: 1,
+                total: total_chapters,
+            };
+        }
+
+        TaskMessage::BookLoadError { error } => {
+            tracing::error!("Book load error: {}", error);
+            app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", error));
+            app.loading_state = LoadingState::Idle;
+        }
+
+        TaskMessage::ChapterRendered {
+            chapter_idx,
+            rendered_chapter,
+        } => {
+            // Update the rendered chapter in the book
+            if let Some(book) = &mut app.book {
+                if let Some(chapter) = book.chapters.get_mut(chapter_idx) {
+                    *chapter = rendered_chapter;
+                }
+
+                // Update loading state
+                if let LoadingState::RenderingChapters { rendered, total } = &mut app.loading_state
+                {
+                    *rendered = chapter_idx + 1;
+                    tracing::debug!("Rendered chapter {}/{}", rendered, total);
+                }
+            }
+        }
+
+        TaskMessage::AllChaptersRendered => {
+            tracing::info!("All chapters rendered");
+            app.loading_state = LoadingState::Idle;
+        }
+
+        TaskMessage::ResizeComplete { width, height } => {
+            tracing::info!("Resize complete: {}x{}", width, height);
+            handle_resize_complete(app, width, height);
+        }
+    }
+}
+
+fn handle_event(
+    app: &mut AppState,
+    ev: Event,
+    resize_tx: &mpsc::UnboundedSender<(u16, u16)>,
+) -> Result<()> {
     match ev {
         Event::Key(key) if key.kind == KeyEventKind::Press => {
             ui::handle_key_event(app, key)?;
         }
         Event::Resize(width, height) => {
-            handle_resize_event(app, width, height);
+            // Update viewport immediately for UI
+            app.update_viewport_size(width, height);
+
+            // Send to debouncer for re-rendering
+            let _ = resize_tx.send((width, height));
         }
         _ => {}
     }
     Ok(())
 }
 
-fn handle_resize_event(app: &mut AppState, width: u16, height: u16) {
-    app.update_viewport_size(width, height);
-
+fn handle_resize_complete(app: &mut AppState, width: u16, _height: u16) {
     // Re-render all chapters with new width
     let effective_width = app.effective_max_width();
-    let viewport_width = app.viewport.width;
+    let viewport_width = width;
     let search_query = app.search_query.clone();
     let has_search_results = !app.search_results.is_empty();
 

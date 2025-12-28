@@ -4,7 +4,8 @@ use crate::constants::{
 use crate::persistence::{PersistenceManager, ReadingProgress};
 use crate::toc::TocManager;
 use crate::types::{
-    Book, Bookmark, Config, FocusTarget, SearchMatch, TocState, UiMode, Viewport, ZenModeState,
+    Book, Bookmark, Config, FocusTarget, LoadingState, SearchMatch, TocState, UiMode, Viewport,
+    ZenModeState,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -52,6 +53,9 @@ pub struct AppState {
     pub recent_books: Vec<String>,
     pub current_book_path: Option<String>,
     pub book_picker_selected_idx: Option<usize>,
+
+    // Async task state
+    pub loading_state: LoadingState,
 }
 
 impl AppState {
@@ -93,6 +97,7 @@ impl AppState {
             recent_books,
             current_book_path: None,
             book_picker_selected_idx: None,
+            loading_state: LoadingState::Idle,
         }
     }
 

@@ -1,5 +1,6 @@
 // Library exports
 pub mod app;
+pub mod async_tasks;
 pub mod bookmarks;
 pub mod cli;
 pub mod constants;

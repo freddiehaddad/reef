@@ -189,3 +189,14 @@ pub struct ZenModeState {
     pub statusbar_visible: bool,
     pub titlebar_visible: bool,
 }
+
+/// Loading state for background operations
+#[derive(Debug, Clone)]
+pub enum LoadingState {
+    /// No background operation running
+    Idle,
+    /// Loading and parsing an EPUB file
+    LoadingBook { file_path: String },
+    /// Rendering chapters in background
+    RenderingChapters { rendered: usize, total: usize },
+}
