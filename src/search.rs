@@ -193,11 +193,13 @@ mod tests {
                         text: "This is a test line".to_string(),
                         style: LineStyle::Normal,
                         search_matches: vec![],
+                        inline_styles: vec![],
                     },
                     RenderedLine {
                         text: "Another test line here".to_string(),
                         style: LineStyle::Normal,
                         search_matches: vec![],
+                        inline_styles: vec![],
                     },
                 ],
                 file_path: "ch1.xhtml".to_string(),

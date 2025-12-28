@@ -1,6 +1,6 @@
 use crate::constants::UI_MARGIN_WIDTH;
 use crate::epub::code_highlight::CodeHighlighter;
-use crate::types::{Chapter, LineStyle, RenderedLine};
+use crate::types::{Chapter, InlineStyle, LineStyle, RenderedLine};
 use lazy_static::lazy_static;
 use scraper::{ElementRef, Html, Selector};
 use textwrap::wrap;
@@ -277,7 +277,7 @@ fn process_heading(
     level: u8,
     style: LineStyle,
 ) {
-    let text = get_text_content(element);
+    let (text, inline_styles) = extract_text_with_inline_styles(element);
     let start_line = lines.len();
     let id = element.value().attr("id").map(|s| s.to_string());
     headings.push(HeadingInfo {
@@ -286,7 +286,7 @@ fn process_heading(
         line_number: start_line,
         id,
     });
-    add_text_lines(lines, &text, width, style);
+    add_text_lines(lines, &text, width, style, inline_styles);
     add_blank_line(lines);
 }
 
@@ -308,6 +308,7 @@ fn process_code_block(element: ElementRef, lines: &mut Vec<RenderedLine>) {
                         language: language.clone(),
                     },
                     search_matches: Vec::new(),
+                    inline_styles: Vec::new(),
                 });
             }
         }
@@ -319,6 +320,7 @@ fn process_code_block(element: ElementRef, lines: &mut Vec<RenderedLine>) {
                 text: line.to_string(),
                 style: LineStyle::CodeBlock { language: None },
                 search_matches: Vec::new(),
+                inline_styles: Vec::new(),
             });
         }
     }
@@ -342,25 +344,26 @@ fn process_image(element: ElementRef, lines: &mut Vec<RenderedLine>) {
         text: placeholder,
         style: LineStyle::Normal,
         search_matches: Vec::new(),
+        inline_styles: Vec::new(),
     });
     add_blank_line(lines);
 }
 
 fn process_paragraph(element: ElementRef, lines: &mut Vec<RenderedLine>, width: usize) {
-    let text = extract_paragraph_with_inline_code(element);
-    add_text_lines(lines, &text, width, LineStyle::Normal);
+    let (text, inline_styles) = extract_text_with_inline_styles(element);
+    add_text_lines(lines, &text, width, LineStyle::Normal, inline_styles);
     add_blank_line(lines);
 }
 
 fn process_blockquote(element: ElementRef, lines: &mut Vec<RenderedLine>, width: usize) {
-    let text = get_text_content(element);
-    add_text_lines(lines, &text, width, LineStyle::Quote);
+    let (text, inline_styles) = extract_text_with_inline_styles(element);
+    add_text_lines(lines, &text, width, LineStyle::Quote, inline_styles);
     add_blank_line(lines);
 }
 
 fn process_link(element: ElementRef, lines: &mut Vec<RenderedLine>, width: usize) {
-    let text = get_text_content(element);
-    add_text_lines(lines, &text, width, LineStyle::Link);
+    let (text, inline_styles) = extract_text_with_inline_styles(element);
+    add_text_lines(lines, &text, width, LineStyle::Link, inline_styles);
 }
 
 fn process_container(
@@ -377,9 +380,9 @@ fn process_container(
 }
 
 fn process_inline_as_block(element: ElementRef, lines: &mut Vec<RenderedLine>, width: usize) {
-    let text = get_text_content(element);
+    let (text, inline_styles) = extract_text_with_inline_styles(element);
     if !text.trim().is_empty() {
-        add_text_lines(lines, &text, width, LineStyle::Normal);
+        add_text_lines(lines, &text, width, LineStyle::Normal, inline_styles);
     }
 }
 
@@ -387,27 +390,56 @@ fn get_text_content(element: ElementRef) -> String {
     element.text().collect::<Vec<_>>().join("")
 }
 
-fn extract_paragraph_with_inline_code(element: ElementRef) -> String {
+/// Extract text content with inline styling information
+/// Returns: (text, Vec<(start, end, InlineStyle)>)
+fn extract_text_with_inline_styles(
+    element: ElementRef,
+) -> (String, Vec<(usize, usize, InlineStyle)>) {
     let mut result = String::new();
+    let mut inline_styles = Vec::new();
 
-    for child in element.children() {
-        if let Some(text) = child.value().as_text() {
-            result.push_str(text);
-        } else if let Some(child_elem) = ElementRef::wrap(child) {
-            let tag = child_elem.value().name();
-            if tag == "code" {
-                // Mark inline code with backticks for now
-                // In future phases, we can apply special styling
-                result.push('`');
-                result.push_str(&get_text_content(child_elem));
-                result.push('`');
-            } else {
-                result.push_str(&get_text_content(child_elem));
+    fn process_children(
+        element: ElementRef,
+        result: &mut String,
+        inline_styles: &mut Vec<(usize, usize, InlineStyle)>,
+        current_styles: &[InlineStyle],
+    ) {
+        for child in element.children() {
+            if let Some(text) = child.value().as_text() {
+                let start = result.len();
+                result.push_str(text);
+                let end = result.len();
+
+                // Add all current styles for this text range
+                for style in current_styles {
+                    if end > start {
+                        inline_styles.push((start, end, style.clone()));
+                    }
+                }
+            } else if let Some(child_elem) = ElementRef::wrap(child) {
+                let tag = child_elem.value().name();
+
+                // Determine which styles to add for this tag
+                let mut new_styles = current_styles.to_vec();
+                match tag {
+                    "strong" | "b" => new_styles.push(InlineStyle::Bold),
+                    "em" | "i" => new_styles.push(InlineStyle::Italic),
+                    "code" => new_styles.push(InlineStyle::Code),
+                    "u" => new_styles.push(InlineStyle::Underline),
+                    "s" | "del" | "strike" => new_styles.push(InlineStyle::Strikethrough),
+                    "mark" => new_styles.push(InlineStyle::Highlight),
+                    _ => {}
+                }
+
+                // Process children with accumulated styles
+                process_children(child_elem, result, inline_styles, &new_styles);
             }
         }
     }
 
-    result
+    process_children(element, &mut result, &mut inline_styles, &[]);
+
+    (result, inline_styles)
 }
 
 fn detect_language(code_element: ElementRef) -> Option<String> {
@@ -470,18 +502,52 @@ fn detect_language(code_element: ElementRef) -> Option<String> {
     None
 }
 
-fn add_text_lines(lines: &mut Vec<RenderedLine>, text: &str, width: usize, style: LineStyle) {
+fn add_text_lines(
+    lines: &mut Vec<RenderedLine>,
+    text: &str,
+    width: usize,
+    style: LineStyle,
+    inline_styles: Vec<(usize, usize, InlineStyle)>,
+) {
     if text.trim().is_empty() {
         return;
     }
 
     let wrapped = wrap(text, width);
+    let mut char_offset = 0;
+
     for wrapped_line in wrapped {
+        let line_text = wrapped_line.to_string();
+        let line_len = line_text.len();
+        let line_end = char_offset + line_len;
+
+        // Find inline styles that overlap with this wrapped line
+        let mut line_inline_styles = Vec::new();
+        for (start, end, style_type) in &inline_styles {
+            // Check if this style range overlaps with current line
+            if *end > char_offset && *start < line_end {
+                // Adjust positions relative to this line
+                let new_start = (*start).max(char_offset) - char_offset;
+                let new_end = (*end).min(line_end) - char_offset;
+                if new_end > new_start {
+                    line_inline_styles.push((new_start, new_end, style_type.clone()));
+                }
+            }
+        }
+
         lines.push(RenderedLine {
-            text: wrapped_line.to_string(),
+            text: line_text,
             style: style.clone(),
             search_matches: Vec::new(),
+            inline_styles: line_inline_styles,
         });
+
+        // Account for space or newline that was removed by wrapping
+        char_offset = line_end;
+        // textwrap removes spaces at wrap points, so we need to account for that
+        if char_offset < text.len() && text.chars().nth(char_offset) == Some(' ') {
+            char_offset += 1;
+        }
     }
 }
 
@@ -490,6 +556,7 @@ fn add_blank_line(lines: &mut Vec<RenderedLine>) {
         text: String::new(),
         style: LineStyle::Normal,
         search_matches: Vec::new(),
+        inline_styles: Vec::new(),
     });
 }
 
@@ -498,13 +565,19 @@ fn add_blank_line(lines: &mut Vec<RenderedLine>) {
 fn process_unordered_list(element: ElementRef, lines: &mut Vec<RenderedLine>, width: usize) {
     let li_selector = Selector::parse("li").unwrap();
     for li in element.select(&li_selector) {
-        let text = get_text_content(li);
+        let (text, inline_styles) = extract_text_with_inline_styles(li);
         let bullet_text = format!("• {}", text);
+        // Adjust inline style positions for the bullet prefix (2 chars)
+        let adjusted_styles: Vec<_> = inline_styles
+            .into_iter()
+            .map(|(start, end, style)| (start + 2, end + 2, style))
+            .collect();
         add_text_lines(
             lines,
             &bullet_text,
             width.saturating_sub(2),
             LineStyle::Normal,
+            adjusted_styles,
         );
     }
     add_blank_line(lines);
@@ -513,13 +586,20 @@ fn process_unordered_list(element: ElementRef, lines: &mut Vec<RenderedLine>, wi
 fn process_ordered_list(element: ElementRef, lines: &mut Vec<RenderedLine>, width: usize) {
     let li_selector = Selector::parse("li").unwrap();
     for (index, li) in element.select(&li_selector).enumerate() {
-        let text = get_text_content(li);
+        let (text, inline_styles) = extract_text_with_inline_styles(li);
         let numbered_text = format!("{}. {}", index + 1, text);
+        // Adjust inline style positions for the number prefix
+        let prefix_len = format!("{}. ", index + 1).len();
+        let adjusted_styles: Vec<_> = inline_styles
+            .into_iter()
+            .map(|(start, end, style)| (start + prefix_len, end + prefix_len, style))
+            .collect();
         add_text_lines(
             lines,
             &numbered_text,
             width.saturating_sub(3),
             LineStyle::Normal,
+            adjusted_styles,
         );
     }
     add_blank_line(lines);
@@ -531,19 +611,25 @@ fn process_definition_list(element: ElementRef, lines: &mut Vec<RenderedLine>, w
 
     // Process definition terms
     for dt in element.select(&dt_selector) {
-        let text = get_text_content(dt);
-        add_text_lines(lines, &text, width, LineStyle::Heading3);
+        let (text, inline_styles) = extract_text_with_inline_styles(dt);
+        add_text_lines(lines, &text, width, LineStyle::Heading3, inline_styles);
     }
 
     // Process definition descriptions
     for dd in element.select(&dd_selector) {
-        let text = get_text_content(dd);
+        let (text, inline_styles) = extract_text_with_inline_styles(dd);
         let indented_text = format!("  {}", text);
+        // Adjust inline style positions for the indent (2 chars)
+        let adjusted_styles: Vec<_> = inline_styles
+            .into_iter()
+            .map(|(start, end, style)| (start + 2, end + 2, style))
+            .collect();
         add_text_lines(
             lines,
             &indented_text,
             width.saturating_sub(2),
             LineStyle::Normal,
+            adjusted_styles,
         );
     }
 
@@ -556,6 +642,7 @@ fn process_table(element: ElementRef, lines: &mut Vec<RenderedLine>, width: usiz
         text: "[Table]".to_string(),
         style: LineStyle::Normal,
         search_matches: Vec::new(),
+        inline_styles: Vec::new(),
     });
 
     let tr_selector = Selector::parse("tr").unwrap();
@@ -563,14 +650,30 @@ fn process_table(element: ElementRef, lines: &mut Vec<RenderedLine>, width: usiz
 
     for tr in element.select(&tr_selector) {
         let mut row_text = String::new();
+        let mut row_inline_styles = Vec::new();
+        let mut current_pos = 0;
+
         for (index, td) in tr.select(&td_selector).enumerate() {
             if index > 0 {
                 row_text.push_str(" | ");
+                current_pos += 3;
             }
-            row_text.push_str(&get_text_content(td));
+            let (text, inline_styles) = extract_text_with_inline_styles(td);
+            // Adjust inline style positions for the current position in row
+            for (start, end, style) in inline_styles {
+                row_inline_styles.push((start + current_pos, end + current_pos, style));
+            }
+            row_text.push_str(&text);
+            current_pos += text.len();
         }
         if !row_text.trim().is_empty() {
-            add_text_lines(lines, &row_text, width, LineStyle::Normal);
+            add_text_lines(
+                lines,
+                &row_text,
+                width,
+                LineStyle::Normal,
+                row_inline_styles,
+            );
         }
     }
 
@@ -583,6 +686,7 @@ fn process_horizontal_rule(lines: &mut Vec<RenderedLine>, width: usize) {
         text: rule,
         style: LineStyle::Normal,
         search_matches: Vec::new(),
+        inline_styles: Vec::new(),
     });
     add_blank_line(lines);
 }
@@ -600,12 +704,14 @@ fn process_semantic_container(
             text: "┌─ Aside ─".to_string(),
             style: LineStyle::Quote,
             search_matches: Vec::new(),
+            inline_styles: Vec::new(),
         });
     } else if tag_name == "figure" {
         lines.push(RenderedLine {
             text: "[Figure]".to_string(),
             style: LineStyle::Normal,
             search_matches: Vec::new(),
+            inline_styles: Vec::new(),
         });
     }
 
@@ -621,6 +727,7 @@ fn process_semantic_container(
             text: "└─────────".to_string(),
             style: LineStyle::Quote,
             search_matches: Vec::new(),
+            inline_styles: Vec::new(),
         });
         add_blank_line(lines);
     }
@@ -637,6 +744,7 @@ fn process_navigation(
         text: "─── Navigation ───".to_string(),
         style: LineStyle::Heading3,
         search_matches: Vec::new(),
+        inline_styles: Vec::new(),
     });
 
     // Process links in navigation
@@ -649,6 +757,7 @@ fn process_navigation(
                 text: nav_item,
                 style: LineStyle::Link,
                 search_matches: Vec::new(),
+                inline_styles: Vec::new(),
             });
         }
     }

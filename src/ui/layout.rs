@@ -4,7 +4,7 @@
 //! including title bar, status bar, content area, and side panels.
 
 use crate::app::AppState;
-use crate::types::{FocusTarget, LineStyle, LoadingState, UiMode};
+use crate::types::{FocusTarget, InlineStyle, LineStyle, LoadingState, UiMode};
 use crate::ui::widgets;
 use ratatui::{
     Frame,
@@ -182,6 +182,122 @@ fn render_titlebar(f: &mut Frame, app: &AppState, area: Rect) {
     f.render_widget(title, area);
 }
 
+/// Build a styled line with inline styles and search highlighting
+/// Handles the complex logic of merging inline styles with search highlighting
+fn build_styled_line(
+    line: &crate::types::RenderedLine,
+    line_idx: usize,
+    cursor_line: usize,
+    search_results: &[crate::types::SearchMatch],
+    current_search_idx: usize,
+    current_chapter: usize,
+) -> Line<'static> {
+    // If no inline styles and no search matches, use simple rendering
+    if line.inline_styles.is_empty() && line.search_matches.is_empty() {
+        let base_style = get_line_style(&line.style, line_idx, cursor_line);
+        return Line::from(Span::styled(line.text.clone(), base_style));
+    }
+
+    let mut spans = Vec::new();
+    let base_style = get_line_style(&line.style, line_idx, cursor_line);
+
+    // Split text into regions based on all style boundaries
+    let mut boundaries: Vec<usize> = vec![0, line.text.len()];
+
+    // Add boundaries from search matches
+    for (start, end) in &line.search_matches {
+        boundaries.push(*start);
+        boundaries.push(*end);
+    }
+
+    // Add boundaries from inline styles
+    for (start, end, _) in &line.inline_styles {
+        boundaries.push(*start);
+        boundaries.push(*end);
+    }
+
+    // Remove duplicates and sort
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    // Build spans for each region
+    for i in 0..boundaries.len().saturating_sub(1) {
+        let start = boundaries[i];
+        let end = boundaries[i + 1];
+
+        if start >= line.text.len() || start >= end {
+            continue;
+        }
+
+        // Check if this region is part of a search match
+        let search_info = line.search_matches.iter().find_map(|(s_start, s_end)| {
+            if start >= *s_start && end <= *s_end {
+                let is_current = if !search_results.is_empty() {
+                    let current_result = &search_results[current_search_idx];
+                    current_result.chapter_idx == current_chapter
+                        && current_result.line == line_idx
+                        && current_result.column == *s_start
+                } else {
+                    false
+                };
+                Some(is_current)
+            } else {
+                None
+            }
+        });
+
+        // Get applicable inline styles for this region
+        let applicable_inline_styles: Vec<_> = line
+            .inline_styles
+            .iter()
+            .filter(|(s_start, s_end, _)| start >= *s_start && end <= *s_end)
+            .map(|(_, _, style)| style.clone())
+            .collect();
+
+        // Build the style for this span
+        let mut span_style = base_style;
+
+        if let Some(is_current) = search_info {
+            // Search highlighting takes full precedence
+            let highlight_color = if is_current {
+                Color::Rgb(255, 200, 100) // Current match: bright yellow/orange
+            } else {
+                Color::Rgb(200, 150, 50) // Other matches: darker yellow
+            };
+            span_style = span_style.bg(highlight_color).fg(Color::Black);
+        } else {
+            // Apply inline styles
+            for inline_style in applicable_inline_styles {
+                match inline_style {
+                    InlineStyle::Bold => {
+                        span_style = span_style.add_modifier(Modifier::BOLD);
+                    }
+                    InlineStyle::Italic => {
+                        span_style = span_style.add_modifier(Modifier::ITALIC);
+                    }
+                    InlineStyle::Code => {
+                        span_style = span_style.fg(Color::Cyan);
+                    }
+                    InlineStyle::Underline => {
+                        span_style = span_style.add_modifier(Modifier::UNDERLINED);
+                    }
+                    InlineStyle::Strikethrough => {
+                        span_style = span_style.add_modifier(Modifier::CROSSED_OUT);
+                    }
+                    InlineStyle::Highlight => {
+                        span_style = span_style.bg(Color::Yellow).fg(Color::Black);
+                    }
+                }
+            }
+        }
+
+        let text_slice = &line.text[start..end.min(line.text.len())];
+        spans.push(Span::styled(text_slice.to_string(), span_style));
+    }
+
+    Line::from(spans)
+}
+
 fn render_content(f: &mut Frame, app: &AppState, area: Rect) {
     // Calculate the width that was used for text wrapping during chapter rendering
     let available_width = area.width as usize;
@@ -234,64 +350,17 @@ fn render_content(f: &mut Frame, app: &AppState, area: Rect) {
         {
             let global_line_idx = visible_start + idx;
 
-            // Apply search highlighting if there are matches in this line
-            if !line.search_matches.is_empty() {
-                // Build line with search highlights
-                let mut spans = Vec::new();
-                let mut last_pos = 0;
+            // Build styled line with inline styles and search highlighting
+            let styled_line = build_styled_line(
+                line,
+                global_line_idx,
+                app.cursor_line,
+                &app.search_results,
+                app.current_search_idx,
+                app.current_chapter,
+            );
 
-                for (start, end) in &line.search_matches {
-                    // Add text before match
-                    if *start > last_pos {
-                        let base_style =
-                            get_line_style(&line.style, global_line_idx, app.cursor_line);
-                        spans.push(Span::styled(
-                            line.text[last_pos..*start].to_string(),
-                            base_style,
-                        ));
-                    }
-
-                    // Determine if this is the current search result
-                    let is_current_match = if !app.search_results.is_empty() {
-                        let current_result = &app.search_results[app.current_search_idx];
-                        current_result.chapter_idx == app.current_chapter
-                            && current_result.line == global_line_idx
-                            && current_result.column == *start
-                    } else {
-                        false
-                    };
-
-                    // Add highlighted match
-                    let highlight_color = if is_current_match {
-                        Color::Rgb(255, 200, 100) // Current match: bright yellow/orange
-                    } else {
-                        Color::Rgb(200, 150, 50) // Other matches: darker yellow
-                    };
-
-                    let mut match_style =
-                        get_line_style(&line.style, global_line_idx, app.cursor_line);
-                    match_style = match_style.bg(highlight_color).fg(Color::Black);
-
-                    spans.push(Span::styled(
-                        line.text[*start..*end].to_string(),
-                        match_style,
-                    ));
-
-                    last_pos = *end;
-                }
-
-                // Add remaining text after last match
-                if last_pos < line.text.len() {
-                    let base_style = get_line_style(&line.style, global_line_idx, app.cursor_line);
-                    spans.push(Span::styled(line.text[last_pos..].to_string(), base_style));
-                }
-
-                lines.push(Line::from(spans));
-            } else {
-                // No search matches, render normally
-                let base_style = get_line_style(&line.style, global_line_idx, app.cursor_line);
-                lines.push(Line::from(Span::styled(line.text.clone(), base_style)));
-            }
+            lines.push(styled_line);
         }
 
         let paragraph = Paragraph::new(lines)

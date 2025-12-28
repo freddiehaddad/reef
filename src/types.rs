@@ -76,6 +76,8 @@ pub struct RenderedLine {
     pub style: LineStyle,
     /// Character ranges (start, end) that match the current search query
     pub search_matches: Vec<(usize, usize)>,
+    /// Inline text styles (start, end, style_type) for bold, italic, code, etc.
+    pub inline_styles: Vec<(usize, usize, InlineStyle)>,
 }
 
 /// Visual style options for rendering text lines
@@ -88,6 +90,17 @@ pub enum LineStyle {
     CodeBlock { language: Option<String> },
     Quote,
     Link,
+}
+
+/// Inline text styling options (bold, italic, code, etc.)
+#[derive(Debug, Clone, PartialEq)]
+pub enum InlineStyle {
+    Bold,
+    Italic,
+    Code,
+    Underline,
+    Strikethrough,
+    Highlight,
 }
 
 /// EPUB metadata extracted from the book
