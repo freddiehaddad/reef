@@ -20,6 +20,13 @@ lazy_static! {
 /// * `max_width` - Optional maximum line width (None = use terminal width)
 /// * `terminal_width` - Current terminal width in columns
 pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_width: u16) {
+    log::debug!(
+        "Rendering chapter '{}': max_width={:?}, terminal_width={}",
+        chapter.title,
+        max_width,
+        terminal_width
+    );
+
     // Determine effective width
     let width = if let Some(max) = max_width {
         max.min(terminal_width as usize)
@@ -28,19 +35,33 @@ pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_
     };
 
     let width = width.saturating_sub(UI_MARGIN_WIDTH); // Reserve space for margins/UI
+    log::debug!("  Effective rendering width: {} columns", width);
 
     // Parse HTML content from the chapter's file
     let html = Html::parse_fragment(&chapter.file_path);
+    let html_len = chapter.file_path.len();
 
     // Extract and render content, also track heading positions
     let (rendered_lines, headings) = extract_and_render(&html, width);
+    log::debug!(
+        "  Rendered {} lines, found {} headings from {} bytes of HTML",
+        rendered_lines.len(),
+        headings.len(),
+        html_len
+    );
 
     // If chapter has no sections from TOC, extract them from HTML headings
     if chapter.sections.is_empty() {
+        log::debug!("  No TOC sections, extracting from HTML headings");
         // Build sections from h2/h3 headings found in content
         for heading in &headings {
             // Skip h1 (chapter title) and only include h2/h3 as sections
             if heading.level >= 2 && heading.level <= 3 {
+                log::debug!(
+                    "    Adding section from heading: '{}' at line {}",
+                    heading.text,
+                    heading.line_number
+                );
                 chapter.sections.push(crate::types::Section {
                     title: heading.text.clone(),
                     start_line: heading.line_number,
@@ -48,9 +69,13 @@ pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_
                 });
             }
         }
+        log::debug!(
+            "  Extracted {} sections from headings",
+            chapter.sections.len()
+        );
     } else {
         // Match existing TOC sections to rendered headings
-        tracing::debug!(
+        log::debug!(
             "Matching {} TOC sections to {} headings",
             chapter.sections.len(),
             headings.len()
@@ -61,7 +86,7 @@ pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_
 
             // First, try to match by fragment ID (most reliable)
             if let Some(ref section_fragment) = section.fragment_id {
-                tracing::debug!(
+                log::debug!(
                     "Trying to match section '{}' with fragment_id '{}'",
                     section.title,
                     section_fragment
@@ -71,7 +96,7 @@ pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_
                     if let Some(ref heading_id) = heading.id
                         && heading_id == section_fragment
                     {
-                        tracing::debug!(
+                        log::debug!(
                             "  ✓ Matched by fragment ID to heading '{}' at line {}",
                             heading.text,
                             heading.line_number
@@ -83,14 +108,14 @@ pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_
                 }
 
                 if !matched {
-                    tracing::debug!("  ✗ No fragment ID match found");
+                    log::debug!("  ✗ No fragment ID match found");
                 }
             }
 
             // If no fragment ID match, fall back to title matching
             if !matched {
                 let normalized_section_title = normalize_text(&section.title);
-                tracing::debug!(
+                log::debug!(
                     "Trying to match section '{}' by title (normalized: '{}')",
                     section.title,
                     normalized_section_title
@@ -100,7 +125,7 @@ pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_
                     let normalized_heading_text = normalize_text(&heading.text);
 
                     if normalized_heading_text == normalized_section_title {
-                        tracing::debug!(
+                        log::debug!(
                             "  ✓ Matched by title to heading '{}' at line {}",
                             heading.text,
                             heading.line_number
@@ -112,9 +137,7 @@ pub fn render_chapter(chapter: &mut Chapter, max_width: Option<usize>, terminal_
                 }
 
                 if !matched {
-                    tracing::debug!(
-                        "  ✗ No title match found, section will remain at start_line 0"
-                    );
+                    log::debug!("  ✗ No title match found, section will remain at start_line 0");
                 }
             }
         }

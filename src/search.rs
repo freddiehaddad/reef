@@ -22,8 +22,13 @@ impl SearchEngine {
     /// * `Ok(Vec<SearchMatch>)` - List of matches found
     /// * `Err(String)` - Invalid regex or search timeout
     pub fn search(book: &Book, query: &str) -> Result<Vec<SearchMatch>, String> {
+        log::info!("Starting search: query='{}'", query);
+
         // Validate and compile regex
-        let regex = Regex::new(query).map_err(|e| format!("Invalid regex pattern: {}", e))?;
+        let regex = Regex::new(query).map_err(|e| {
+            log::warn!("Invalid regex pattern '{}': {}", query, e);
+            format!("Invalid regex pattern: {}", e)
+        })?;
 
         let mut results = Vec::new();
         let start_time = Instant::now();
@@ -32,6 +37,11 @@ impl SearchEngine {
         for (chapter_idx, chapter) in book.chapters.iter().enumerate() {
             // Check timeout
             if start_time.elapsed() > SEARCH_TIMEOUT {
+                log::warn!(
+                    "Search timed out after {:?} ({} results found)",
+                    start_time.elapsed(),
+                    results.len()
+                );
                 return Err("Search cancelled (timeout)".to_string());
             }
 
@@ -48,18 +58,29 @@ impl SearchEngine {
 
                     // Stop if we've hit the limit
                     if results.len() >= MAX_SEARCH_RESULTS {
+                        log::warn!(
+                            "Search hit maximum result limit ({} results)",
+                            MAX_SEARCH_RESULTS
+                        );
                         return Ok(results);
                     }
                 }
             }
         }
 
+        log::info!(
+            "Search completed: found {} matches in {:?}",
+            results.len(),
+            start_time.elapsed()
+        );
         Ok(results)
     }
 
     /// Apply search match highlighting to rendered lines
     /// Updates the search_matches field in RenderedLine structs
     pub fn apply_highlights(book: &mut Book, results: &[SearchMatch]) {
+        log::debug!("Applying search highlights: {} matches", results.len());
+
         // First, clear all existing highlights
         for chapter in &mut book.chapters {
             for line in &mut chapter.content_lines {
@@ -76,10 +97,14 @@ impl SearchEngine {
                     .push((result.column, result.column + result.match_length));
             }
         }
+
+        log::debug!("Search highlights applied successfully");
     }
 
     /// Clear all search highlights from the book
     pub fn clear_highlights(book: &mut Book) {
+        log::debug!("Clearing all search highlights");
+
         for chapter in &mut book.chapters {
             for line in &mut chapter.content_lines {
                 line.search_matches.clear();

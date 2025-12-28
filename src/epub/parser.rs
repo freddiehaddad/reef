@@ -33,20 +33,32 @@ struct SectionInfo {
 /// ```
 pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
     let path_str = path.as_ref().to_string_lossy().to_string();
+    log::info!("Parsing EPUB file: {}", path_str);
 
     // Check if file exists
     if !path.as_ref().exists() {
+        log::error!("EPUB file not found: {}", path_str);
         return Err(AppError::FileNotFound(path_str));
     }
 
     // Open EPUB
-    let mut doc = EpubDoc::new(&path).map_err(|e| AppError::InvalidEpub(format!("{}", e)))?;
+    log::debug!("Opening EPUB document");
+    let mut doc = EpubDoc::new(&path).map_err(|e| {
+        log::error!("Failed to open EPUB: {}", e);
+        AppError::InvalidEpub(format!("{}", e))
+    })?;
 
     // Parse metadata
     let metadata = parse_metadata(&doc);
+    log::debug!(
+        "Parsed metadata: title='{}', author={:?}",
+        metadata.title,
+        metadata.author
+    );
 
     // Parse TOC to get chapter and section titles
     let toc = parse_toc(&doc);
+    log::debug!("Parsed TOC: {} entries found", toc.len());
 
     // Build a mapping from spine ID to file path
     let mut id_to_path = HashMap::new();
@@ -64,6 +76,7 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
 
     // Get the spine (reading order)
     let spine_len = doc.spine.len();
+    log::debug!("Processing {} spine entries (chapters)", spine_len);
 
     for spine_index in 0..spine_len {
         doc.set_current_chapter(spine_index);
@@ -82,8 +95,22 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
             .and_then(|entry| entry.title.clone())
             .unwrap_or_else(|| format!("Chapter {}", spine_index + 1));
 
+        log::debug!(
+            "Processing chapter {}/{}: '{}' (spine_id: {}, path: {})",
+            spine_index + 1,
+            spine_len,
+            title,
+            spine_id,
+            file_path
+        );
+
         // Get HTML content - get_current_str() returns (content, mime_type)
         let (content_html, _mime_type) = doc.get_current_str().ok_or_else(|| {
+            log::error!(
+                "Failed to extract content for chapter {} ({})",
+                spine_index,
+                title
+            );
             AppError::ChapterExtractionError(format!("Failed to extract chapter {}", spine_index))
         })?;
 
@@ -93,13 +120,24 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
             .map(|entry| entry.sections.clone())
             .unwrap_or_default();
 
+        log::debug!("  Found {} TOC sections for chapter", toc_sections.len());
+
         // Convert to Section structs (will be matched with headings during rendering)
         let sections = toc_sections
             .iter()
-            .map(|s| Section {
-                title: s.title.clone(),
-                start_line: 0,
-                fragment_id: s.fragment_id.clone(),
+            .enumerate()
+            .map(|(idx, s)| {
+                log::debug!(
+                    "    Section {}: '{}' (fragment_id: {:?})",
+                    idx + 1,
+                    s.title,
+                    s.fragment_id
+                );
+                Section {
+                    title: s.title.clone(),
+                    start_line: 0,
+                    fragment_id: s.fragment_id.clone(),
+                }
             })
             .collect();
 
@@ -111,6 +149,10 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
         });
     }
 
+    log::info!(
+        "Successfully parsed EPUB: {} chapters extracted",
+        chapters.len()
+    );
     Ok(Book { metadata, chapters })
 }
 

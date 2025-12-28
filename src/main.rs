@@ -30,8 +30,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use tracing_subscriber::EnvFilter;
 use types::{Config, LoadingState, UiMode};
 
 #[tokio::main]
@@ -52,22 +50,39 @@ async fn run() -> Result<()> {
     // Initialize logging if requested
     if let Some(log_file) = &cli.log_file {
         init_logging(log_file)?;
-        tracing::info!("EPUB Reader starting");
+        log::info!("=== EPUB Reader starting ===");
+        log::info!("Log file: {}", log_file);
+        if let Some(file) = &cli.file {
+            log::info!("Loading file: {}", file);
+        }
+        if let Some(max_width) = cli.max_width {
+            log::info!("CLI max width override: {}", max_width);
+        }
     }
 
     // Check terminal size
     let (width, height) = crossterm::terminal::size()?;
     if width < MIN_TERMINAL_WIDTH || height < MIN_TERMINAL_HEIGHT {
+        log::error!(
+            "Terminal too small: {}x{} (minimum: {}x{})",
+            width,
+            height,
+            MIN_TERMINAL_WIDTH,
+            MIN_TERMINAL_HEIGHT
+        );
         return Err(AppError::TerminalTooSmall);
     }
+    log::debug!("Terminal size: {}x{}", width, height);
 
     // Setup terminal
     setup_terminal()?;
+    log::debug!("Terminal setup completed");
 
     // Setup Ctrl-C handler
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     ctrlc::set_handler(move || {
+        log::info!("Ctrl-C received, shutting down");
         r.store(false, Ordering::SeqCst);
     })
     .map_err(|e| AppError::Other(format!("Failed to set Ctrl-C handler: {}", e)))?;
@@ -77,6 +92,7 @@ async fn run() -> Result<()> {
 
     // Cleanup terminal
     cleanup_terminal()?;
+    log::debug!("Terminal cleanup completed");
 
     result
 }
@@ -102,17 +118,31 @@ fn cleanup_terminal() -> Result<()> {
 }
 
 fn init_logging(log_file: &str) -> Result<()> {
-    let path = std::path::Path::new(log_file);
-    let parent = path.parent().unwrap_or(std::path::Path::new("."));
-    let filename = path.file_name().unwrap();
+    use std::fs::OpenOptions;
+    use std::io::Write;
 
-    let file_appender = RollingFileAppender::new(Rotation::NEVER, parent, filename);
+    // Open/create log file, truncating if it exists
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(log_file)
+        .map_err(|e| AppError::Other(format!("Failed to open log file: {}", e)))?;
 
-    tracing_subscriber::fmt()
-        .with_writer(file_appender)
-        .with_env_filter(
-            EnvFilter::from_default_env().add_directive("epub_reader=debug".parse().unwrap()),
-        )
+    // Initialize env_logger with file output
+    env_logger::Builder::new()
+        .target(env_logger::Target::Pipe(Box::new(file)))
+        .filter_module("reef", log::LevelFilter::Debug) // Only log from our crate
+        .filter_level(log::LevelFilter::Off) // Disable all other crates
+        .format(|buf, record| {
+            writeln!(
+                buf,
+                "{} [{}] {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                record.args()
+            )
+        })
         .init();
 
     Ok(())
@@ -144,37 +174,55 @@ async fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
     // Save state before quitting
     save_app_state(&mut app);
 
-    tracing::info!("EPUB Reader shutting down");
+    log::info!("EPUB Reader shutting down");
     Ok(())
 }
 
 fn initialize_app_state(cli: &Cli) -> Result<AppState> {
+    log::debug!("Initializing application state");
+
     // Initialize persistence manager
-    let persistence = PersistenceManager::new()
-        .map_err(|e| AppError::Other(format!("Failed to initialize persistence: {}", e)))?;
+    let persistence = PersistenceManager::new().map_err(|e| {
+        log::error!("Failed to initialize persistence: {}", e);
+        AppError::Other(format!("Failed to initialize persistence: {}", e))
+    })?;
 
     // Load config
     let config = persistence.load_config().unwrap_or_else(|e| {
-        tracing::warn!("Failed to load config: {}. Using defaults.", e);
+        log::warn!("Failed to load config: {}. Using defaults.", e);
         Config::default()
     });
+    log::debug!(
+        "Config loaded: max_width={:?}, toc_panel_width={}, bookmarks_panel_width={}",
+        config.max_width,
+        config.toc_panel_width,
+        config.bookmarks_panel_width
+    );
 
     let mut app = AppState::new(config, persistence);
 
     // Set CLI max_width override (not persisted)
     if let Some(max_width) = cli.max_width {
         app.cli_max_width_override = Some(max_width);
+        log::debug!("CLI max width override applied: {}", max_width);
     }
 
     // Get terminal size and update viewport
     let (width, height) = crossterm::terminal::size()?;
     app.update_viewport_size(width, height);
+    log::debug!(
+        "Viewport initialized: {}x{}",
+        app.viewport.width,
+        app.viewport.height
+    );
 
     Ok(app)
 }
 
 fn load_initial_book(app: &mut AppState, cli: &Cli, task_runner: &AsyncTaskRunner) -> Result<()> {
     if let Some(file_path) = &cli.file {
+        log::info!("Starting initial book load: {}", file_path);
+
         // Start async loading
         let effective_width = app.effective_max_width();
         let viewport_width = app.viewport.width;
@@ -187,12 +235,18 @@ fn load_initial_book(app: &mut AppState, cli: &Cli, task_runner: &AsyncTaskRunne
         };
     } else {
         // No file provided - check if we have recent books
+        log::debug!("No file provided, checking recent books");
         if app.recent_books.is_empty() {
+            log::error!("No recent books available");
             return Err(AppError::Other(
                 "No recent books. Usage: reef <file.epub>".to_string(),
             ));
         }
 
+        log::debug!(
+            "Showing book picker with {} recent books",
+            app.recent_books.len()
+        );
         // Show book picker
         app.ui_mode = UiMode::BookPicker;
         app.book_picker_selected_idx = Some(0);
@@ -243,12 +297,12 @@ async fn run_event_loop(
 fn handle_task_message(app: &mut AppState, msg: TaskMessage) {
     match msg {
         TaskMessage::BookLoadingStarted { file_path } => {
-            tracing::info!("Book loading started: {}", file_path);
+            log::info!("Book loading started: {}", file_path);
             app.loading_state = LoadingState::LoadingBook { file_path };
         }
 
         TaskMessage::BookLoaded { book, file_path } => {
-            tracing::info!(
+            log::info!(
                 "Book loaded: {} ({} chapters)",
                 book.metadata.title,
                 book.chapters.len()
@@ -258,7 +312,7 @@ fn handle_task_message(app: &mut AppState, msg: TaskMessage) {
 
             // Load book through normal path (handles persistence)
             if let Err(e) = app.load_book_with_path(file_path.clone()) {
-                tracing::error!("Failed to load book path: {}", e);
+                log::error!("Failed to load book path: {}", e);
                 app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", e));
                 app.loading_state = LoadingState::Idle;
                 return;
@@ -275,7 +329,7 @@ fn handle_task_message(app: &mut AppState, msg: TaskMessage) {
         }
 
         TaskMessage::BookLoadError { error } => {
-            tracing::error!("Book load error: {}", error);
+            log::error!("Book load error: {}", error);
             app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", error));
             app.loading_state = LoadingState::Idle;
         }
@@ -294,18 +348,18 @@ fn handle_task_message(app: &mut AppState, msg: TaskMessage) {
                 if let LoadingState::RenderingChapters { rendered, total } = &mut app.loading_state
                 {
                     *rendered = chapter_idx + 1;
-                    tracing::debug!("Rendered chapter {}/{}", rendered, total);
+                    log::debug!("Rendered chapter {}/{}", rendered, total);
                 }
             }
         }
 
         TaskMessage::AllChaptersRendered => {
-            tracing::info!("All chapters rendered");
+            log::info!("All chapters rendered");
             app.loading_state = LoadingState::Idle;
         }
 
         TaskMessage::ResizeComplete { width, height } => {
-            tracing::info!("Resize complete: {}x{}", width, height);
+            log::info!("Resize complete: {}x{}", width, height);
             handle_resize_complete(app, width, height);
         }
     }
@@ -333,6 +387,8 @@ fn handle_event(
 }
 
 fn handle_resize_complete(app: &mut AppState, width: u16, _height: u16) {
+    log::info!("Handling resize complete: {}x{}", width, _height);
+
     // Re-render all chapters with new width
     let effective_width = app.effective_max_width();
     let viewport_width = width;
@@ -340,12 +396,17 @@ fn handle_resize_complete(app: &mut AppState, width: u16, _height: u16) {
     let has_search_results = !app.search_results.is_empty();
 
     if let Some(book) = &mut app.book {
+        log::debug!(
+            "Re-rendering {} chapters for new width",
+            book.chapters.len()
+        );
         for chapter in &mut book.chapters {
             epub::render_chapter(chapter, effective_width, viewport_width);
         }
 
         // Re-apply search highlights if there are active results
         if has_search_results {
+            log::debug!("Re-applying search highlights after resize");
             // Re-run search to recalculate match positions in new line structure
             if let Ok(new_results) = search::SearchEngine::search(book, &search_query) {
                 app.search_results = new_results;
@@ -353,10 +414,12 @@ fn handle_resize_complete(app: &mut AppState, width: u16, _height: u16) {
             }
         }
     }
+
+    log::debug!("Resize handling complete");
 }
 
 fn save_app_state(app: &mut AppState) {
     if let Err(e) = app.save_state() {
-        tracing::error!("Failed to save state: {}", e);
+        log::error!("Failed to save state: {}", e);
     }
 }

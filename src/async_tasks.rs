@@ -102,6 +102,8 @@ async fn load_epub_task(
     tx: mpsc::UnboundedSender<TaskMessage>,
     cancel_rx: watch::Receiver<bool>,
 ) {
+    log::info!("Starting EPUB load task: {}", file_path);
+
     // Send loading started message
     let _ = tx.send(TaskMessage::BookLoadingStarted {
         file_path: file_path.clone(),
@@ -109,22 +111,29 @@ async fn load_epub_task(
 
     // Parse EPUB in blocking task (file I/O is blocking)
     let path = PathBuf::from(file_path.clone());
+    log::debug!("Spawning blocking task for EPUB parsing");
     let parse_result = tokio::task::spawn_blocking(move || parse_epub(&path)).await;
 
     // Check cancellation
     if *cancel_rx.borrow() {
+        log::info!("EPUB load task cancelled during parsing");
         return;
     }
 
     let mut book = match parse_result {
-        Ok(Ok(book)) => book,
+        Ok(Ok(book)) => {
+            log::debug!("EPUB parsing completed successfully");
+            book
+        }
         Ok(Err(e)) => {
+            log::error!("EPUB parsing error: {}", e);
             let _ = tx.send(TaskMessage::BookLoadError {
                 error: e.to_string(),
             });
             return;
         }
         Err(e) => {
+            log::error!("Task join error during EPUB parsing: {}", e);
             let _ = tx.send(TaskMessage::BookLoadError {
                 error: format!("Task join error: {}", e),
             });
@@ -133,8 +142,14 @@ async fn load_epub_task(
     };
 
     // Render first chapter immediately
+    log::debug!("Rendering first chapter immediately");
     if let Some(first_chapter) = book.chapters.first_mut() {
         render_chapter(first_chapter, effective_width, viewport_width);
+        log::debug!(
+            "First chapter rendered: '{}' ({} lines)",
+            first_chapter.title,
+            first_chapter.content_lines.len()
+        );
     }
 
     // Send book with first chapter rendered
@@ -144,14 +159,32 @@ async fn load_epub_task(
     });
 
     // Render remaining chapters in background
+    let total_chapters = book.chapters.len();
+    log::debug!(
+        "Rendering remaining {} chapters in background",
+        total_chapters - 1
+    );
+
     for (idx, chapter) in book.chapters.iter_mut().enumerate().skip(1) {
         // Check cancellation
         if *cancel_rx.borrow() {
+            log::info!(
+                "EPUB load task cancelled during chapter rendering (at chapter {}/{})",
+                idx + 1,
+                total_chapters
+            );
             return;
         }
 
         // Render chapter
         render_chapter(chapter, effective_width, viewport_width);
+        log::debug!(
+            "Rendered chapter {}/{}: '{}' ({} lines)",
+            idx + 1,
+            total_chapters,
+            chapter.title,
+            chapter.content_lines.len()
+        );
 
         // Send progress
         let _ = tx.send(TaskMessage::ChapterRendered {
@@ -165,10 +198,12 @@ async fn load_epub_task(
 
     // Check final cancellation
     if *cancel_rx.borrow() {
+        log::info!("EPUB load task cancelled after rendering");
         return;
     }
 
     // All chapters rendered
+    log::info!("All chapters rendered successfully");
     let _ = tx.send(TaskMessage::AllChaptersRendered);
 }
 
@@ -178,22 +213,26 @@ async fn resize_debounce_task(
     tx: mpsc::UnboundedSender<TaskMessage>,
     debounce_ms: u64,
 ) {
+    log::debug!("Resize debouncer started (debounce: {}ms)", debounce_ms);
     let mut last_size: Option<(u16, u16)> = None;
 
     loop {
         match tokio::time::timeout(Duration::from_millis(debounce_ms), resize_rx.recv()).await {
             Ok(Some(size)) => {
                 // Got new resize event
+                log::debug!("Resize event received: {}x{}", size.0, size.1);
                 last_size = Some(size);
             }
             Ok(None) => {
                 // Channel closed
+                log::debug!("Resize channel closed");
                 break;
             }
             Err(_) => {
                 // Timeout - no more resize events for debounce period
                 if let Some((width, height)) = last_size.take() {
                     // Send the debounced resize
+                    log::info!("Debounced resize event: {}x{}", width, height);
                     let _ = tx.send(TaskMessage::ResizeComplete { width, height });
                 }
             }

@@ -26,13 +26,26 @@ impl BookmarkManager {
         line: usize,
         label: String,
     ) -> Result<(), String> {
+        log::debug!(
+            "Adding bookmark: chapter={}, line={}, label='{}'",
+            chapter_idx,
+            line,
+            label
+        );
+
         // Validate label
         let trimmed_label = label.trim();
         if trimmed_label.is_empty() {
+            log::warn!("Bookmark creation failed: empty label");
             return Err("Bookmark label cannot be empty".to_string());
         }
 
         if trimmed_label.len() > MAX_LABEL_LENGTH {
+            log::warn!(
+                "Bookmark creation failed: label too long ({} > {})",
+                trimmed_label.len(),
+                MAX_LABEL_LENGTH
+            );
             return Err(format!(
                 "Bookmark label too long (max {} characters)",
                 MAX_LABEL_LENGTH
@@ -41,6 +54,10 @@ impl BookmarkManager {
 
         // Check bookmark limit
         if bookmarks.len() >= MAX_BOOKMARKS {
+            log::warn!(
+                "Bookmark creation failed: max bookmarks ({}) reached",
+                MAX_BOOKMARKS
+            );
             return Err(format!("Maximum bookmarks ({}) reached", MAX_BOOKMARKS));
         }
 
@@ -56,6 +73,13 @@ impl BookmarkManager {
         // Sort bookmarks by position (chapter, then line)
         bookmarks.sort_by(|a, b| a.chapter_idx.cmp(&b.chapter_idx).then(a.line.cmp(&b.line)));
 
+        log::info!(
+            "Bookmark added successfully: '{}' at chapter {}, line {} ({} total bookmarks)",
+            trimmed_label,
+            chapter_idx,
+            line,
+            bookmarks.len()
+        );
         Ok(())
     }
 

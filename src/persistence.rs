@@ -58,7 +58,7 @@ impl PersistenceManager {
         let content = fs::read_to_string(&config_path).context("Failed to read config file")?;
 
         let config: Config = serde_json::from_str(&content).unwrap_or_else(|e| {
-            tracing::warn!("Failed to parse config file: {}. Using defaults.", e);
+            log::warn!("Failed to parse config file: {}. Using defaults.", e);
             Config::default()
         });
 
@@ -99,7 +99,7 @@ impl PersistenceManager {
 
         let progress: HashMap<String, ReadingProgress> = serde_json::from_str(&content)
             .unwrap_or_else(|e| {
-                tracing::warn!(
+                log::warn!(
                     "Failed to parse reading progress file: {}. Starting fresh.",
                     e
                 );
@@ -134,7 +134,7 @@ impl PersistenceManager {
             fs::read_to_string(&recent_path).context("Failed to read recent books file")?;
 
         let books: Vec<String> = serde_json::from_str(&content).unwrap_or_else(|e| {
-            tracing::warn!("Failed to parse recent books file: {}. Starting fresh.", e);
+            log::warn!("Failed to parse recent books file: {}. Starting fresh.", e);
             Vec::new()
         });
 
@@ -178,7 +178,7 @@ impl PersistenceManager {
         }
 
         let file: BookmarksFile = serde_json::from_str(&content).unwrap_or_else(|e| {
-            tracing::warn!("Failed to parse bookmarks file: {}. Starting fresh.", e);
+            log::warn!("Failed to parse bookmarks file: {}. Starting fresh.", e);
             BookmarksFile {
                 bookmarks: Vec::new(),
             }

@@ -87,15 +87,18 @@ impl InputHandler {
     fn handle_search_popup(app: &mut AppState, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => {
+                log::debug!("Search cancelled by user");
                 app.ui_mode = UiMode::Normal;
                 app.input_buffer.clear();
             }
             KeyCode::Enter => {
                 if !app.input_buffer.is_empty() {
+                    log::info!("Executing search: query='{}'", app.input_buffer);
                     // Perform search
                     if let Some(book) = &mut app.book {
                         match crate::search::SearchEngine::search(book, &app.input_buffer) {
                             Ok(results) => {
+                                log::info!("Search completed: {} results found", results.len());
                                 app.search_query = app.input_buffer.clone();
                                 app.search_results = results;
                                 app.current_search_idx = 0;
@@ -108,13 +111,15 @@ impl InputHandler {
 
                                 // Jump to first result if any
                                 if !app.search_results.is_empty() {
+                                    log::debug!("Jumping to first search result");
                                     app.next_search_result();
                                 }
 
                                 app.ui_mode = UiMode::Normal;
                                 app.input_buffer.clear();
                             }
-                            Err(_) => {
+                            Err(e) => {
+                                log::warn!("Search failed: {}", e);
                                 // Keep popup open on error
                             }
                         }
@@ -137,11 +142,13 @@ impl InputHandler {
     fn handle_bookmark_prompt(app: &mut AppState, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => {
+                log::debug!("Bookmark creation cancelled by user");
                 app.ui_mode = UiMode::Normal;
                 app.input_buffer.clear();
             }
             KeyCode::Enter => {
                 if !app.input_buffer.is_empty() {
+                    log::debug!("Creating bookmark: label='{}'", app.input_buffer);
                     // Add bookmark
                     let result = crate::bookmarks::BookmarkManager::add_bookmark(
                         &mut app.bookmarks,
@@ -153,6 +160,8 @@ impl InputHandler {
                     if result.is_ok() {
                         app.ui_mode = UiMode::Normal;
                         app.input_buffer.clear();
+                    } else if let Err(e) = result {
+                        log::warn!("Bookmark creation failed: {}", e);
                     }
                     // If error, keep popup open
                 }
@@ -173,6 +182,7 @@ impl InputHandler {
     fn handle_book_picker(app: &mut AppState, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => {
+                log::debug!("Book picker closed");
                 if app.book.is_none() {
                     // No book loaded, exit app
                     app.should_quit = true;
@@ -199,9 +209,11 @@ impl InputHandler {
                 if let Some(idx) = app.book_picker_selected_idx
                     && let Some(book_path) = app.recent_books.get(idx).cloned()
                 {
+                    log::info!("Loading book from picker: {}", book_path);
                     // Load the selected book
                     match app.load_book_with_path(book_path.clone()) {
                         Ok(_) => {
+                            log::debug!("Book loaded, rendering all chapters");
                             // Render all chapters
                             let effective_width = app.effective_max_width();
                             let viewport_width = app.viewport.width;
@@ -218,6 +230,7 @@ impl InputHandler {
                             app.focus = FocusTarget::Content;
                         }
                         Err(e) => {
+                            log::error!("Failed to load book from picker: {}", e);
                             app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", e));
                         }
                     }

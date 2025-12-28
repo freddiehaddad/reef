@@ -107,6 +107,14 @@ impl AppState {
 
     pub fn toggle_toc(&mut self) {
         self.toc_panel_visible = !self.toc_panel_visible;
+        log::debug!(
+            "TOC panel toggled: {}",
+            if self.toc_panel_visible {
+                "visible"
+            } else {
+                "hidden"
+            }
+        );
 
         // If opening TOC panel, sync selection to current position
         if self.toc_panel_visible {
@@ -301,18 +309,18 @@ impl AppState {
             None => return,
         };
 
-        tracing::debug!("TOC select: selected_id = {}", selected_id);
+        log::debug!("TOC select: selected_id = {}", selected_id);
 
         // Parse the ID to determine chapter and optional section
         let (chapter_idx, section_idx) = match TocManager::parse_item_id(&selected_id) {
             Some(parsed) => parsed,
             None => {
-                tracing::debug!("TOC select: failed to parse item ID");
+                log::debug!("TOC select: failed to parse item ID");
                 return;
             }
         };
 
-        tracing::debug!(
+        log::debug!(
             "TOC select: chapter_idx = {}, section_idx = {:?}",
             chapter_idx,
             section_idx
@@ -320,7 +328,7 @@ impl AppState {
 
         // Validate chapter index
         if chapter_idx >= self.total_chapters() {
-            tracing::debug!(
+            log::debug!(
                 "TOC select: invalid chapter index {} >= {}",
                 chapter_idx,
                 self.total_chapters()
@@ -337,11 +345,11 @@ impl AppState {
                 .as_ref()
                 .and_then(|b| b.chapters.get(chapter_idx))
                 .and_then(|ch| {
-                    tracing::debug!("TOC select: chapter has {} sections", ch.sections.len());
+                    log::debug!("TOC select: chapter has {} sections", ch.sections.len());
                     ch.sections.get(sec_idx)
                 })
                 .map(|s| {
-                    tracing::debug!(
+                    log::debug!(
                         "TOC select: section '{}' has start_line = {}, fragment_id = {:?}",
                         s.title,
                         s.start_line,
@@ -351,15 +359,15 @@ impl AppState {
                 });
 
             if let Some(start_line) = section_start_line {
-                tracing::debug!("TOC select: jumping to section at line {}", start_line);
+                log::debug!("TOC select: jumping to section at line {}", start_line);
                 self.cursor_line = start_line;
                 self.viewport.scroll_offset = start_line;
             } else {
-                tracing::debug!("TOC select: section not found (sec_idx = {})", sec_idx);
+                log::debug!("TOC select: section not found (sec_idx = {})", sec_idx);
             }
         } else {
             // Jump to chapter start
-            tracing::debug!("TOC select: jumping to chapter start");
+            log::debug!("TOC select: jumping to chapter start");
             self.cursor_line = 0;
             self.viewport.scroll_offset = 0;
         }
@@ -449,9 +457,16 @@ impl AppState {
             return;
         }
 
+        let old_chapter = self.current_chapter;
         self.current_chapter = (self.current_chapter + 1) % total;
         self.cursor_line = 0;
         self.viewport.scroll_offset = 0;
+
+        log::debug!(
+            "Chapter navigation: {} -> {} (next)",
+            old_chapter,
+            self.current_chapter
+        );
 
         // Sync TOC to new position
         self.sync_toc_to_cursor();
@@ -463,6 +478,7 @@ impl AppState {
             return;
         }
 
+        let old_chapter = self.current_chapter;
         if self.current_chapter == 0 {
             self.current_chapter = total - 1;
         } else {
@@ -471,6 +487,12 @@ impl AppState {
 
         self.cursor_line = 0;
         self.viewport.scroll_offset = 0;
+
+        log::debug!(
+            "Chapter navigation: {} -> {} (previous)",
+            old_chapter,
+            self.current_chapter
+        );
 
         // Sync TOC to new position
         self.sync_toc_to_cursor();
@@ -786,6 +808,8 @@ impl AppState {
     pub fn load_book_with_path(&mut self, book_path: String) -> anyhow::Result<()> {
         use crate::persistence::canonicalize_path;
 
+        log::info!("Loading book: {}", book_path);
+
         // Clear search state when switching books
         self.search_query.clear();
         self.search_results.clear();
@@ -793,21 +817,28 @@ impl AppState {
 
         // Canonicalize the path
         let canonical_path = canonicalize_path(&book_path)?;
+        log::debug!("Canonical path: {}", canonical_path);
 
         // Add to recent books (or move to top if already present)
         if let Some(pos) = self.recent_books.iter().position(|p| p == &canonical_path) {
+            log::debug!(
+                "Book already in recent list at position {}, moving to top",
+                pos
+            );
             self.recent_books.remove(pos);
         }
         self.recent_books.insert(0, canonical_path.clone());
 
         // Load the EPUB
         let book = crate::epub::parse_epub(&book_path)?;
+        log::info!("EPUB parsed: {} chapters", book.chapters.len());
 
         // Load bookmarks for this book
         let bookmarks = self
             .persistence
             .load_bookmarks(&canonical_path)
             .unwrap_or_default();
+        log::debug!("Loaded {} bookmarks for this book", bookmarks.len());
         self.bookmarks = bookmarks;
 
         // Load and clone reading progress to avoid borrow issues
@@ -818,9 +849,15 @@ impl AppState {
 
         // Build TOC tree before storing the book
         self.build_toc_tree(&book);
+        log::debug!("TOC tree built: {} items", self.toc_state.items.len());
 
         // Restore position if we have progress
         if let Some(progress) = progress {
+            log::info!(
+                "Restoring reading progress: chapter {}, line {}",
+                progress.chapter_idx,
+                progress.line
+            );
             self.current_chapter = progress
                 .chapter_idx
                 .min(book.chapters.len().saturating_sub(1));
@@ -830,6 +867,7 @@ impl AppState {
             // Restore TOC expansion state
             self.restore_toc_expansion_state(&progress.toc_expansion_state);
         } else {
+            log::debug!("No reading progress found, starting at beginning");
             self.current_chapter = 0;
             self.cursor_line = 0;
             self.viewport.scroll_offset = 0;
