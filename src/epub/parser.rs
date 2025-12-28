@@ -82,7 +82,13 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
         doc.set_current_chapter(spine_index);
 
         // Get chapter title from TOC, fallback to generic title
-        let spine_id = doc.get_current_id().unwrap_or_default();
+        let spine_id = doc.get_current_id().unwrap_or_else(|| {
+            log::warn!(
+                "No spine ID for chapter {}, using empty string",
+                spine_index + 1
+            );
+            String::new()
+        });
 
         // Map spine ID to file path
         let file_path = id_to_path
@@ -118,7 +124,10 @@ pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
         let toc_sections = toc
             .get(file_path)
             .map(|entry| entry.sections.clone())
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                log::debug!("  No TOC sections found for chapter");
+                Vec::new()
+            });
 
         log::debug!("  Found {} TOC sections for chapter", toc_sections.len());
 

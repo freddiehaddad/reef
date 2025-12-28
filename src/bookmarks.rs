@@ -169,10 +169,9 @@ impl BookmarkManager {
         {
             let half_viewport = viewport.height as usize / 2;
             let scroll_offset = bookmark.line.saturating_sub(half_viewport);
-            Some((bookmark.chapter_idx, bookmark.line, scroll_offset))
-        } else {
-            None
+            return Some((bookmark.chapter_idx, bookmark.line, scroll_offset));
         }
+        None
     }
 
     /// Delete a bookmark and return the new selected index
@@ -188,17 +187,16 @@ impl BookmarkManager {
 
             // Update selection
             if bookmarks.is_empty() {
-                None
+                return None;
             } else if idx >= bookmarks.len() {
                 // Was at last bookmark, move to previous
-                Some(bookmarks.len() - 1)
+                return Some(bookmarks.len() - 1);
             } else {
                 // Keep same index (moves to next bookmark)
-                Some(idx)
+                return Some(idx);
             }
-        } else {
-            selected_idx
         }
+        selected_idx
     }
 }
 

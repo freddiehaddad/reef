@@ -66,9 +66,25 @@ pub struct AppState {
 
 impl AppState {
     /// Create a new application state with default settings
+    ///
+    /// # Arguments
+    /// * `config` - User configuration loaded from disk or defaults
+    /// * `persistence` - Persistence manager for saving/loading state
+    ///
+    /// # Returns
+    /// A new AppState initialized with default values and loaded persistent data
     pub fn new(config: Config, persistence: PersistenceManager) -> Self {
-        let reading_progress = persistence.load_reading_progress().unwrap_or_default();
-        let recent_books = persistence.load_recent_books().unwrap_or_default();
+        let reading_progress = persistence.load_reading_progress().unwrap_or_else(|e| {
+            log::warn!("Failed to load reading progress: {}. Starting fresh.", e);
+            HashMap::new()
+        });
+        let recent_books = persistence.load_recent_books().unwrap_or_else(|e| {
+            log::warn!(
+                "Failed to load recent books: {}. Starting with empty list.",
+                e
+            );
+            Vec::new()
+        });
 
         AppState {
             book: None,
@@ -113,6 +129,9 @@ impl AppState {
     }
 
     /// Toggle the table of contents panel visibility
+    ///
+    /// When opening the TOC panel, it syncs the selection to match the current
+    /// reading position. Re-renders chapters to account for changed width.
     pub fn toggle_toc(&mut self) {
         self.toc_panel_visible = !self.toc_panel_visible;
         log::debug!(
@@ -139,6 +158,8 @@ impl AppState {
     }
 
     /// Toggle the bookmarks panel visibility
+    ///
+    /// Re-renders chapters to account for changed available width.
     pub fn toggle_bookmarks(&mut self) {
         self.bookmarks_panel_visible = !self.bookmarks_panel_visible;
 
@@ -632,6 +653,13 @@ impl AppState {
         self.cursor_line = self.cursor_line.min(max_line);
     }
 
+    /// Update viewport dimensions from terminal size
+    ///
+    /// # Arguments
+    /// * `width` - Terminal width in columns
+    /// * `height` - Terminal height in rows
+    ///
+    /// Automatically reserves space for title and status bars if visible.
     pub fn update_viewport_size(&mut self, width: u16, height: u16) {
         self.viewport.width = width;
         // Reserve space for titlebar and statusbar if visible
@@ -641,11 +669,17 @@ impl AppState {
     }
 
     /// Get the effective max width (CLI override takes precedence over config)
+    ///
+    /// # Returns
+    /// * `Some(usize)` - Maximum text width in columns
+    /// * `None` - Use full available width
     pub fn effective_max_width(&self) -> Option<usize> {
         self.cli_max_width_override.or(self.config.max_width)
     }
 
     /// Cycle through max width presets: None -> 80 -> 100 -> 120 -> None
+    ///
+    /// Re-renders all chapters with the new width setting.
     pub fn cycle_max_width(&mut self) {
         let current = self.config.max_width;
         self.config.max_width = match current {
@@ -660,13 +694,8 @@ impl AppState {
         self.rerender_chapters();
     }
 
-    /// Re-render all chapters with current effective width
-    /// Call this when max-width changes or panel visibility changes
-    fn rerender_chapters(&mut self) {
-        // Get effective width before borrowing book mutably
-        let effective_width = self.effective_max_width();
-
-        // Calculate available content width accounting for panels and margins
+    /// Calculate available width for content rendering accounting for visible panels
+    fn calculate_available_width(&self) -> u16 {
         let mut available_width = self.viewport.width;
 
         // Subtract TOC panel width and margin if visible
@@ -681,7 +710,16 @@ impl AppState {
 
         // Add back the UI_MARGIN_WIDTH that will be subtracted in render_chapter
         // This ensures the text wraps to fill the actual available space
-        available_width = available_width.saturating_add(crate::constants::UI_MARGIN_WIDTH as u16);
+        available_width.saturating_add(crate::constants::UI_MARGIN_WIDTH as u16)
+    }
+
+    /// Re-render all chapters with current effective width
+    /// Call this when max-width changes or panel visibility changes
+    fn rerender_chapters(&mut self) {
+        let effective_width = self.effective_max_width();
+        let available_width = self.calculate_available_width();
+        let has_search_results = !self.search_results.is_empty();
+        let search_query = self.search_query.clone();
 
         // Re-render all chapters with available width if we have a book
         if let Some(book) = &mut self.book {
@@ -690,12 +728,15 @@ impl AppState {
             }
 
             // Re-apply search highlights if there are active results
-            if !self.search_results.is_empty() {
-                // Re-run search to recalculate match positions in new line structure
-                let search_query = self.search_query.clone();
+            if has_search_results {
                 if let Ok(new_results) = crate::search::SearchEngine::search(book, &search_query) {
                     self.search_results = new_results;
                     crate::search::SearchEngine::apply_highlights(book, &self.search_results);
+                } else {
+                    log::warn!(
+                        "Failed to re-apply search highlights for query: '{}'",
+                        search_query
+                    );
                 }
             }
         }
@@ -777,6 +818,16 @@ impl AppState {
 
     // Persistence methods
     /// Save current reading state, bookmarks, and configuration to disk
+    ///
+    /// Saves:
+    /// - Current reading position (chapter, line, scroll offset)
+    /// - TOC expansion state
+    /// - Bookmarks for current book
+    /// - Application configuration
+    /// - Recent books list
+    ///
+    /// # Errors
+    /// Returns error if file I/O fails
     pub fn save_state(&mut self) -> anyhow::Result<()> {
         // Save current book progress if we have one
         if let Some(book_path) = &self.current_book_path {
@@ -809,6 +860,19 @@ impl AppState {
     }
 
     /// Load a book from file path and restore reading progress
+    ///
+    /// # Arguments
+    /// * `book_path` - Path to EPUB file (will be canonicalized)
+    ///
+    /// # Returns
+    /// * `Ok(())` - Book loaded successfully, progress restored
+    /// * `Err(_)` - Failed to load or parse EPUB file
+    ///
+    /// # Side Effects
+    /// - Clears search state
+    /// - Adds book to recent books list
+    /// - Loads bookmarks for this book
+    /// - Restores reading position and TOC expansion state if available
     pub fn load_book_with_path(&mut self, book_path: String) -> anyhow::Result<()> {
         use crate::persistence::canonicalize_path;
 
@@ -841,7 +905,14 @@ impl AppState {
         let bookmarks = self
             .persistence
             .load_bookmarks(&canonical_path)
-            .unwrap_or_default();
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "Failed to load bookmarks for '{}': {}. Starting fresh.",
+                    canonical_path,
+                    e
+                );
+                Vec::new()
+            });
         log::debug!("Loaded {} bookmarks for this book", bookmarks.len());
         self.bookmarks = bookmarks;
 

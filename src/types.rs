@@ -1,3 +1,12 @@
+//! Core type definitions for the EPUB reader
+//!
+//! This module contains all the primary data structures used throughout
+//! the application, including:
+//! - Book, Chapter, and Section structures for EPUB content
+//! - UI state types (UiMode, FocusTarget, LoadingState)
+//! - Configuration and viewport types
+//! - Search and bookmark types
+
 /// Represents a parsed EPUB book with metadata and chapters
 #[derive(Debug, Clone)]
 pub struct Book {
@@ -125,7 +134,7 @@ pub struct Viewport {
 }
 
 /// Indicates which UI panel currently has keyboard focus
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FocusTarget {
     Content,
     Toc,

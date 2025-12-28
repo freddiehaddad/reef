@@ -291,7 +291,49 @@ fn build_styled_line(
             }
         }
 
-        let text_slice = &line.text[start..end.min(line.text.len())];
+        // Ensure we slice at valid UTF-8 boundaries
+        // Note: Search matches use byte indices (from regex which guarantees valid boundaries),
+        // but inline styles may have misaligned byte positions due to text wrapping arithmetic
+        // that doesn't account for multi-byte UTF-8 characters.
+        let end = end.min(line.text.len());
+
+        // Find the nearest valid char boundary for start and end
+        let safe_start = if start < line.text.len() && line.text.is_char_boundary(start) {
+            start
+        } else if start >= line.text.len() {
+            continue; // Start is beyond the string
+        } else {
+            // Find the next valid boundary (moving forward)
+            log::debug!(
+                "Misaligned start boundary at byte {} in text: '{}...'",
+                start,
+                &line.text.chars().take(20).collect::<String>()
+            );
+            (start..=end)
+                .find(|&i| i < line.text.len() && line.text.is_char_boundary(i))
+                .unwrap_or_else(|| {
+                    log::warn!("Could not find valid start boundary, skipping span");
+                    end
+                })
+        };
+
+        let safe_end = if end <= line.text.len() && line.text.is_char_boundary(end) {
+            end
+        } else if end > line.text.len() {
+            line.text.len()
+        } else {
+            // Find the previous valid boundary (moving backward)
+            (safe_start..=end.min(line.text.len()))
+                .rev()
+                .find(|&i| line.text.is_char_boundary(i))
+                .unwrap_or(safe_start)
+        };
+
+        if safe_start >= safe_end || safe_start >= line.text.len() {
+            continue;
+        }
+
+        let text_slice = &line.text[safe_start..safe_end];
         spans.push(Span::styled(text_slice.to_string(), span_style));
     }
 

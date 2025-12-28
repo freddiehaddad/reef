@@ -332,7 +332,7 @@ impl InputHandler {
             }
             // Search
             KeyCode::Char('/') => {
-                app.previous_focus = Some(app.focus.clone());
+                app.previous_focus = Some(app.focus);
                 app.ui_mode = UiMode::SearchPopup;
                 app.input_buffer.clear();
             }
@@ -340,7 +340,7 @@ impl InputHandler {
             KeyCode::Char('m') | KeyCode::Char('M')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                app.previous_focus = Some(app.focus.clone());
+                app.previous_focus = Some(app.focus);
                 app.ui_mode = UiMode::BookmarkPrompt;
                 app.input_buffer.clear();
             }
@@ -456,31 +456,36 @@ impl InputHandler {
         }
     }
 
-    fn open_search_popup(app: &mut AppState) {
-        app.previous_focus = Some(app.focus.clone());
-        app.ui_mode = UiMode::SearchPopup;
+    /// Helper to open a popup/modal UI mode with automatic focus tracking
+    fn open_popup(app: &mut AppState, mode: UiMode) {
+        app.previous_focus = Some(app.focus);
+        app.ui_mode = mode;
+    }
+
+    /// Helper to open a popup that also clears the input buffer
+    fn open_input_popup(app: &mut AppState, mode: UiMode) {
+        Self::open_popup(app, mode);
         app.input_buffer.clear();
+    }
+
+    fn open_search_popup(app: &mut AppState) {
+        Self::open_input_popup(app, UiMode::SearchPopup);
     }
 
     fn open_bookmark_prompt(app: &mut AppState) {
-        app.previous_focus = Some(app.focus.clone());
-        app.ui_mode = UiMode::BookmarkPrompt;
-        app.input_buffer.clear();
+        Self::open_input_popup(app, UiMode::BookmarkPrompt);
     }
 
     fn open_help(app: &mut AppState) {
-        app.previous_focus = Some(app.focus.clone());
-        app.ui_mode = UiMode::Help;
+        Self::open_popup(app, UiMode::Help);
     }
 
     fn open_metadata_popup(app: &mut AppState) {
-        app.previous_focus = Some(app.focus.clone());
-        app.ui_mode = UiMode::MetadataPopup;
+        Self::open_popup(app, UiMode::MetadataPopup);
     }
 
     fn open_book_picker(app: &mut AppState) {
-        app.previous_focus = Some(app.focus.clone());
-        app.ui_mode = UiMode::BookPicker;
+        Self::open_popup(app, UiMode::BookPicker);
 
         // Set selection to current book if available
         if let Some(current_path) = &app.current_book_path {

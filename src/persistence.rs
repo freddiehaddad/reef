@@ -1,3 +1,12 @@
+//! Persistent storage for reading progress, bookmarks, and configuration
+//!
+//! This module manages all file-based persistence using JSON files stored
+//! in the user's config directory. It handles:
+//! - Reading progress (chapter, line, scroll position) per book
+//! - User bookmarks with labels
+//! - Application configuration (panel widths, max-width setting)
+//! - Recently opened books list
+
 use crate::constants::{
     MAX_BOOKMARKS_PANEL_WIDTH, MAX_TOC_PANEL_WIDTH, MIN_BOOKMARKS_PANEL_WIDTH, MIN_TOC_PANEL_WIDTH,
 };

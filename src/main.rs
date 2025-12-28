@@ -388,17 +388,18 @@ fn handle_event(
 fn handle_resize_complete(app: &mut AppState, width: u16, _height: u16) {
     log::info!("Handling resize complete: {}x{}", width, _height);
 
-    // Re-render all chapters with new width
     let effective_width = app.effective_max_width();
     let viewport_width = width;
-    let search_query = app.search_query.clone();
     let has_search_results = !app.search_results.is_empty();
+    let search_query = app.search_query.clone();
 
     if let Some(book) = &mut app.book {
         log::debug!(
             "Re-rendering {} chapters for new width",
             book.chapters.len()
         );
+
+        // Re-render all chapters
         for chapter in &mut book.chapters {
             epub::render_chapter(chapter, effective_width, viewport_width);
         }
@@ -406,10 +407,16 @@ fn handle_resize_complete(app: &mut AppState, width: u16, _height: u16) {
         // Re-apply search highlights if there are active results
         if has_search_results {
             log::debug!("Re-applying search highlights after resize");
+
             // Re-run search to recalculate match positions in new line structure
-            if let Ok(new_results) = search::SearchEngine::search(book, &search_query) {
-                app.search_results = new_results;
-                search::SearchEngine::apply_highlights(book, &app.search_results);
+            match search::SearchEngine::search(book, &search_query) {
+                Ok(new_results) => {
+                    app.search_results = new_results;
+                    search::SearchEngine::apply_highlights(book, &app.search_results);
+                }
+                Err(e) => {
+                    log::warn!("Failed to re-apply search after resize: {}", e);
+                }
             }
         }
     }
