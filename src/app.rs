@@ -1,6 +1,6 @@
 use crate::types::{Book, Bookmark, Config, FocusTarget, SearchMatch, TocState, UiMode, Viewport, ZenModeState};
 use crate::persistence::{PersistenceManager, ReadingProgress};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct AppState {
     pub book: Option<Book>,
@@ -21,6 +21,7 @@ pub struct AppState {
     // Panels
     pub toc_panel_visible: bool,
     pub toc_state: TocState,
+    pub toc_expanded_chapters: HashSet<String>,
     pub bookmarks_panel_visible: bool,
     pub selected_bookmark_idx: Option<usize>,
     pub titlebar_visible: bool,
@@ -69,6 +70,7 @@ impl AppState {
             previous_focus: None,
             toc_panel_visible: false,
             toc_state: TocState::new(),
+            toc_expanded_chapters: HashSet::new(),
             bookmarks_panel_visible: false,
             selected_bookmark_idx: None,
             titlebar_visible: true,
@@ -235,8 +237,26 @@ impl AppState {
             return;
         };
 
+        // If selecting a section, expand the parent chapter to make it visible BEFORE selecting
+        if target_id.contains("_section_") {
+            // Extract parent chapter ID: "chapter_1_section_0" -> "chapter_1"
+            if let Some(parent_id) = target_id.split("_section_").next() {
+                let parent_vec = vec![parent_id.to_string()];
+                self.toc_state.tree_state.open(parent_vec);
+                // Track that we expanded this chapter
+                self.toc_expanded_chapters.insert(parent_id.to_string());
+            }
+        }
+
         // Update tree state selection to the target ID
-        self.toc_state.tree_state.select(vec![target_id]);
+        // Use a vector with both parent and child if it's a section
+        if target_id.contains("_section_") {
+            if let Some(parent_id) = target_id.split("_section_").next() {
+                self.toc_state.tree_state.select(vec![parent_id.to_string(), target_id]);
+            }
+        } else {
+            self.toc_state.tree_state.select(vec![target_id]);
+        }
     }
 
     pub fn cycle_focus(&mut self) {
@@ -287,13 +307,42 @@ impl AppState {
     }
 
     pub fn toc_open(&mut self) {
+        // Get selected item before toggling
+        if let Some(selected_id) = self.toc_state.tree_state.selected().first() {
+            // Check if this is a chapter (not a section) and has sections (is expandable)
+            if selected_id.starts_with("chapter_") && !selected_id.contains("_section_") {
+                // Check if chapter has sections by extracting chapter index
+                if let Some(chapter_idx) = selected_id.strip_prefix("chapter_")
+                    .and_then(|s| s.parse::<usize>().ok())
+                {
+                    if let Some(chapter) = self.book.as_ref()
+                        .and_then(|b| b.chapters.get(chapter_idx))
+                    {
+                        if !chapter.sections.is_empty() {
+                            // Toggle expansion state in our tracking
+                            // If currently expanded, it will collapse; if collapsed, it will expand
+                            if self.toc_expanded_chapters.contains(selected_id) {
+                                self.toc_expanded_chapters.remove(selected_id);
+                            } else {
+                                self.toc_expanded_chapters.insert(selected_id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         self.toc_state.tree_state.toggle_selected();
     }
 
     pub fn toc_close(&mut self) {
         if let Some(selected) = self.toc_state.tree_state.selected().first() {
-            let selected_vec = vec![selected.clone()];
+            let selected_id = selected.clone();
+            let selected_vec = vec![selected_id.clone()];
             self.toc_state.tree_state.close(&selected_vec);
+            
+            // Track collapse in our state
+            self.toc_expanded_chapters.remove(&selected_id);
         }
     }
 
@@ -369,6 +418,11 @@ impl AppState {
         
         // Cursor follows viewport
         self.clamp_cursor_to_viewport();
+        
+        // Sync TOC if visible (to update highlighting as we scroll through sections)
+        if self.toc_panel_visible {
+            self.sync_toc_to_cursor();
+        }
     }
 
     pub fn scroll_up(&mut self, lines: usize) {
@@ -376,6 +430,11 @@ impl AppState {
         
         // Cursor follows viewport
         self.clamp_cursor_to_viewport();
+        
+        // Sync TOC if visible (to update highlighting as we scroll through sections)
+        if self.toc_panel_visible {
+            self.sync_toc_to_cursor();
+        }
     }
 
     pub fn move_cursor_to_top(&mut self) {
@@ -782,16 +841,18 @@ impl AppState {
     }
     
     fn get_toc_expansion_state(&self) -> Vec<String> {
-        // Get list of expanded node identifiers
-        // For now, we'll return an empty list since TreeState doesn't expose
-        // the internal state easily. This can be enhanced later.
-        Vec::new()
+        // Return list of expanded chapter IDs from our tracking
+        self.toc_expanded_chapters.iter().cloned().collect()
     }
     
     fn restore_toc_expansion_state(&mut self, state: &[String]) {
-        // Expand nodes that were previously expanded
+        // Clear current tracking
+        self.toc_expanded_chapters.clear();
+        
+        // Expand nodes that were previously expanded and track them
         for id in state {
             self.toc_state.tree_state.open(vec![id.clone()]);
+            self.toc_expanded_chapters.insert(id.clone());
         }
     }
 }
