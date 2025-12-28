@@ -124,11 +124,16 @@ impl AppState {
         }
         
         self.toc_state.items = items;
-        self.toc_state.tree_state.select_first();
+        // Don't select first here - let sync_toc_to_cursor handle it
     }
 
     pub fn toggle_toc(&mut self) {
         self.toc_panel_visible = !self.toc_panel_visible;
+        
+        // If opening TOC panel, sync selection to current position
+        if self.toc_panel_visible {
+            self.sync_toc_to_cursor();
+        }
         
         // If closing TOC panel while it has focus, move focus back to Content
         if !self.toc_panel_visible && self.focus == FocusTarget::TOC {
