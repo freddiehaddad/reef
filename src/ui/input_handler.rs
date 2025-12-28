@@ -350,6 +350,21 @@ impl InputHandler {
 
     fn handle_content(app: &mut AppState, key: KeyEvent) -> Result<()> {
         match key.code {
+            // Clear search highlights
+            KeyCode::Esc => {
+                if !app.search_results.is_empty() {
+                    // Clear highlights from book
+                    if let Some(book) = &mut app.book {
+                        crate::search::SearchEngine::clear_highlights(book);
+                    }
+
+                    // Clear search state
+                    app.search_results.clear();
+                    app.search_query.clear();
+                    app.current_search_idx = 0;
+                }
+            }
+
             // Quit
             KeyCode::Char('q') => {
                 app.should_quit = true;

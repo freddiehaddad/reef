@@ -69,7 +69,6 @@ impl SearchEngine {
     }
 
     /// Clear all search highlights from the book
-    #[allow(dead_code)]
     pub fn clear_highlights(book: &mut Book) {
         for chapter in &mut book.chapters {
             for line in &mut chapter.content_lines {
