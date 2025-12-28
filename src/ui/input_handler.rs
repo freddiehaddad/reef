@@ -215,30 +215,8 @@ impl InputHandler {
                     && let Some(book_path) = app.recent_books.get(idx).cloned()
                 {
                     log::info!("Loading book from picker: {}", book_path);
-                    // Load the selected book
-                    match app.load_book_with_path(book_path.clone()) {
-                        Ok(_) => {
-                            log::debug!("Book loaded, rendering all chapters");
-                            // Render all chapters
-                            let effective_width = app.effective_max_width();
-                            let viewport_width = app.viewport.width;
-                            if let Some(book) = &mut app.book {
-                                for chapter in &mut book.chapters {
-                                    crate::epub::render_chapter(
-                                        chapter,
-                                        effective_width,
-                                        viewport_width,
-                                    );
-                                }
-                            }
-                            app.ui_mode = UiMode::Normal;
-                            app.focus = FocusTarget::Content;
-                        }
-                        Err(e) => {
-                            log::error!("Failed to load book from picker: {}", e);
-                            app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", e));
-                        }
-                    }
+                    // Load the selected book asynchronously
+                    app.load_book_async(book_path);
                 }
             }
             _ => {}

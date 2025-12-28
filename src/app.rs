@@ -3,6 +3,7 @@
 //! This module contains the main application state (`AppState`) and all
 //! the methods for managing UI state, navigation, and user interactions.
 
+use crate::async_tasks::TaskMessage;
 use crate::constants::{
     DEFAULT_TERMINAL_HEIGHT, DEFAULT_TERMINAL_WIDTH, WIDTH_PRESET_1, WIDTH_PRESET_2, WIDTH_PRESET_3,
 };
@@ -13,6 +14,7 @@ use crate::types::{
     ZenModeState,
 };
 use std::collections::{HashMap, HashSet};
+use tokio::sync::mpsc;
 
 /// Main application state containing all UI and data state
 pub struct AppState {
@@ -62,6 +64,9 @@ pub struct AppState {
 
     // Async task state
     pub loading_state: LoadingState,
+
+    // Task channel for triggering async operations
+    pub task_tx: Option<mpsc::UnboundedSender<TaskMessage>>,
 }
 
 impl AppState {
@@ -121,6 +126,34 @@ impl AppState {
             current_book_path: None,
             book_picker_selected_idx: None,
             loading_state: LoadingState::Idle,
+            task_tx: None,
+        }
+    }
+
+    /// Set the task channel for triggering async operations
+    ///
+    /// This should be called once during initialization to enable async book loading
+    pub fn set_task_channel(&mut self, tx: mpsc::UnboundedSender<TaskMessage>) {
+        self.task_tx = Some(tx);
+    }
+
+    /// Trigger async book loading
+    ///
+    /// Returns immediately - loading happens in background with progress updates
+    pub fn load_book_async(&mut self, file_path: String) {
+        if let Some(tx) = &self.task_tx {
+            let effective_width = self.effective_max_width();
+            let viewport_width = self.viewport.width;
+
+            // Create task runner and spawn loading task
+            let task_runner = crate::async_tasks::AsyncTaskRunner::new(tx.clone());
+            let (_handle, _join_handle) =
+                task_runner.spawn_load_epub(file_path.clone(), effective_width, viewport_width);
+
+            // Set loading state
+            self.loading_state = LoadingState::LoadingBook { file_path };
+        } else {
+            log::error!("Cannot load book async: task channel not initialized");
         }
     }
 
@@ -859,24 +892,26 @@ impl AppState {
         Ok(())
     }
 
-    /// Load a book from file path and restore reading progress
+    /// Finalize book loading after async task completes
+    ///
+    /// Takes ownership of the fully-rendered book and sets up metadata,
+    /// bookmarks, reading progress, and TOC state.
     ///
     /// # Arguments
-    /// * `book_path` - Path to EPUB file (will be canonicalized)
-    ///
-    /// # Returns
-    /// * `Ok(())` - Book loaded successfully, progress restored
-    /// * `Err(_)` - Failed to load or parse EPUB file
+    /// * `book` - Fully parsed and rendered book (moved, not cloned)
+    /// * `file_path` - Path to EPUB file (will be canonicalized)
     ///
     /// # Side Effects
     /// - Clears search state
     /// - Adds book to recent books list
     /// - Loads bookmarks for this book
     /// - Restores reading position and TOC expansion state if available
-    pub fn load_book_with_path(&mut self, book_path: String) -> anyhow::Result<()> {
+    /// - Closes book picker if open
+    /// - Sets UI mode to Normal
+    pub fn finalize_book_load(&mut self, book: Book, file_path: String) -> anyhow::Result<()> {
         use crate::persistence::canonicalize_path;
 
-        log::info!("Loading book: {}", book_path);
+        log::info!("Finalizing book load: {}", file_path);
 
         // Clear search state when switching books
         self.search_query.clear();
@@ -884,7 +919,7 @@ impl AppState {
         self.current_search_idx = 0;
 
         // Canonicalize the path
-        let canonical_path = canonicalize_path(&book_path)?;
+        let canonical_path = canonicalize_path(&file_path)?;
         log::debug!("Canonical path: {}", canonical_path);
 
         // Add to recent books (or move to top if already present)
@@ -896,10 +931,6 @@ impl AppState {
             self.recent_books.remove(pos);
         }
         self.recent_books.insert(0, canonical_path.clone());
-
-        // Load the EPUB
-        let book = crate::epub::parse_epub(&book_path)?;
-        log::info!("EPUB parsed: {} chapters", book.chapters.len());
 
         // Load bookmarks for this book
         let bookmarks = self
@@ -948,10 +979,15 @@ impl AppState {
             self.viewport.scroll_offset = 0;
         }
 
+        // Store the book
         self.book = Some(book);
 
         // Sync TOC to restored position
         self.sync_toc_to_cursor();
+
+        // Close book picker and return to normal mode
+        self.ui_mode = UiMode::Normal;
+        self.loading_state = LoadingState::Idle;
 
         Ok(())
     }

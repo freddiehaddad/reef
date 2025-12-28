@@ -18,20 +18,14 @@ pub enum TaskMessage {
     /// EPUB loading started
     BookLoadingStarted { file_path: String },
 
-    /// EPUB loaded successfully with first chapter rendered
-    BookLoaded { book: Book, file_path: String },
+    /// Progress update during chapter rendering (lightweight - just numbers)
+    RenderProgress { rendered: usize, total: usize },
+
+    /// EPUB loading completed - all chapters rendered
+    BookLoadingComplete { book: Book, file_path: String },
 
     /// EPUB loading failed
     BookLoadError { error: String },
-
-    /// A chapter has been rendered
-    ChapterRendered {
-        chapter_idx: usize,
-        rendered_chapter: crate::types::Chapter,
-    },
-
-    /// All chapters have been rendered
-    AllChaptersRendered,
 
     /// Resize event after debounce timeout
     ResizeComplete { width: u16, height: u16 },
@@ -141,8 +135,10 @@ async fn load_epub_task(
         }
     };
 
-    // Render first chapter immediately
-    log::debug!("Rendering first chapter immediately");
+    let total_chapters = book.chapters.len();
+    log::debug!("Rendering {} chapters", total_chapters);
+
+    // Render first chapter immediately (for quick initial display)
     if let Some(first_chapter) = book.chapters.first_mut() {
         render_chapter(first_chapter, effective_width, viewport_width);
         log::debug!(
@@ -150,21 +146,15 @@ async fn load_epub_task(
             first_chapter.title,
             first_chapter.content_lines.len()
         );
+
+        // Send progress update for first chapter
+        let _ = tx.send(TaskMessage::RenderProgress {
+            rendered: 1,
+            total: total_chapters,
+        });
     }
 
-    // Send book with first chapter rendered
-    let _ = tx.send(TaskMessage::BookLoaded {
-        book: book.clone(),
-        file_path,
-    });
-
-    // Render remaining chapters in background
-    let total_chapters = book.chapters.len();
-    log::debug!(
-        "Rendering remaining {} chapters in background",
-        total_chapters - 1
-    );
-
+    // Render remaining chapters
     for (idx, chapter) in book.chapters.iter_mut().enumerate().skip(1) {
         // Check cancellation
         if *cancel_rx.borrow() {
@@ -186,10 +176,10 @@ async fn load_epub_task(
             chapter.content_lines.len()
         );
 
-        // Send progress
-        let _ = tx.send(TaskMessage::ChapterRendered {
-            chapter_idx: idx,
-            rendered_chapter: chapter.clone(),
+        // Send progress update (just numbers, lightweight)
+        let _ = tx.send(TaskMessage::RenderProgress {
+            rendered: idx + 1,
+            total: total_chapters,
         });
 
         // Yield to prevent blocking tokio runtime
@@ -202,9 +192,9 @@ async fn load_epub_task(
         return;
     }
 
-    // All chapters rendered
-    log::info!("All chapters rendered successfully");
-    let _ = tx.send(TaskMessage::AllChaptersRendered);
+    // All chapters rendered - send complete book (move ownership, no clone)
+    log::info!("All chapters rendered successfully, sending book");
+    let _ = tx.send(TaskMessage::BookLoadingComplete { book, file_path });
 }
 
 /// Background task for debouncing resize events

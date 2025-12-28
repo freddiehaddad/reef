@@ -15,7 +15,7 @@ use app::AppState;
 use async_tasks::{AsyncTaskRunner, TaskMessage};
 use clap::Parser;
 use cli::Cli;
-use constants::{FRAME_DURATION_MS, MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH, RESIZE_DEBOUNCE_MS};
+use constants::{MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH, RESIZE_DEBOUNCE_MS};
 use crossterm::{
     cursor::{Hide, Show},
     event::{self, Event, KeyEventKind},
@@ -28,7 +28,6 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use types::{Config, LoadingState, UiMode};
 
@@ -160,7 +159,10 @@ async fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
     let mut app = initialize_app_state(&cli)?;
 
     // Create task runner
-    let task_runner = AsyncTaskRunner::new(task_tx);
+    let task_runner = AsyncTaskRunner::new(task_tx.clone());
+
+    // Set task channel in app for async book loading
+    app.set_task_channel(task_tx);
 
     // Create resize debouncer
     let resize_tx = task_runner.spawn_resize_debouncer(RESIZE_DEBOUNCE_MS);
@@ -262,32 +264,74 @@ async fn run_event_loop(
     running: Arc<AtomicBool>,
     resize_tx: &mpsc::UnboundedSender<(u16, u16)>,
 ) -> Result<()> {
-    let frame_duration = Duration::from_millis(FRAME_DURATION_MS);
+    // Initial render
+    terminal.draw(|f| {
+        ui::layout::render(f, app);
+    })?;
 
+    // Flush any pending stdin to avoid picking up buffered input from shell
+    // This prevents "cargo run" keypresses from being interpreted as app input
+    while event::poll(std::time::Duration::from_millis(0))? {
+        let _ = event::read()?;
+        log::debug!("Flushed buffered event during startup");
+    }
+
+    // Create a channel for input events
+    let (input_tx, mut input_rx) = mpsc::unbounded_channel();
+
+    // Spawn a persistent task to read input events
+    let running_clone = running.clone();
+    tokio::task::spawn_blocking(move || {
+        while running_clone.load(Ordering::SeqCst) {
+            match event::read() {
+                Ok(ev) => {
+                    log::debug!("Raw event received: {:?}", ev);
+                    // Only send key press events and other relevant events
+                    // Filter out key release and repeat events to avoid duplicates
+                    let should_send = match &ev {
+                        Event::Key(key) => key.kind == KeyEventKind::Press,
+                        Event::Resize(_, _) => true,
+                        _ => false,
+                    };
+
+                    if should_send {
+                        log::debug!("Sending filtered event: {:?}", ev);
+                        if input_tx.send(ev).is_err() {
+                            // Channel closed, exit
+                            break;
+                        }
+                    } else {
+                        log::debug!("Filtered out event: {:?}", ev);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Error reading input event: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    // Event-driven loop - only wakes on actual events
     while running.load(Ordering::SeqCst) && !app.should_quit {
-        let frame_start = Instant::now();
-
-        // Process all pending task messages (non-blocking)
-        while let Ok(msg) = task_rx.try_recv() {
-            handle_task_message(app, msg);
+        // Block until an event occurs
+        tokio::select! {
+            // Background task message (book loading, chapter rendering, resize complete)
+            Some(msg) = task_rx.recv() => {
+                log::debug!("Received task message: {:?}", msg);
+                handle_task_message(app, msg);
+            }
+            // Terminal input event (keyboard, resize, etc.)
+            Some(ev) = input_rx.recv() => {
+                log::debug!("Received input event: {:?}", ev);
+                handle_event(app, ev, resize_tx)?;
+            }
         }
 
-        // Render UI
+        // Render UI after processing event
         terminal.draw(|f| {
             ui::layout::render(f, app);
         })?;
-
-        // Poll for input events (non-blocking)
-        if event::poll(Duration::from_millis(0))? {
-            let ev = event::read()?;
-            handle_event(app, ev, resize_tx)?;
-        }
-
-        // Sleep to maintain frame rate
-        let elapsed = frame_start.elapsed();
-        if elapsed < frame_duration {
-            tokio::time::sleep(frame_duration - elapsed).await;
-        }
     }
 
     Ok(())
@@ -300,60 +344,29 @@ fn handle_task_message(app: &mut AppState, msg: TaskMessage) {
             app.loading_state = LoadingState::LoadingBook { file_path };
         }
 
-        TaskMessage::BookLoaded { book, file_path } => {
+        TaskMessage::RenderProgress { rendered, total } => {
+            log::debug!("Render progress: {}/{}", rendered, total);
+            app.loading_state = LoadingState::RenderingChapters { rendered, total };
+        }
+
+        TaskMessage::BookLoadingComplete { book, file_path } => {
             log::info!(
-                "Book loaded: {} ({} chapters)",
+                "Book loading complete: {} ({} chapters)",
                 book.metadata.title,
                 book.chapters.len()
             );
 
-            let total_chapters = book.chapters.len();
-
-            // Load book through normal path (handles persistence)
-            if let Err(e) = app.load_book_with_path(file_path.clone()) {
-                log::error!("Failed to load book path: {}", e);
+            // Call finalize_book_load to set up book metadata
+            if let Err(e) = app.finalize_book_load(book, file_path) {
+                log::error!("Failed to finalize book load: {}", e);
                 app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", e));
                 app.loading_state = LoadingState::Idle;
-                return;
             }
-
-            // Set the loaded book (with first chapter already rendered)
-            app.book = Some(book);
-
-            // Update loading state
-            app.loading_state = LoadingState::RenderingChapters {
-                rendered: 1,
-                total: total_chapters,
-            };
         }
 
         TaskMessage::BookLoadError { error } => {
             log::error!("Book load error: {}", error);
             app.ui_mode = UiMode::ErrorPopup(format!("Failed to load book: {}", error));
-            app.loading_state = LoadingState::Idle;
-        }
-
-        TaskMessage::ChapterRendered {
-            chapter_idx,
-            rendered_chapter,
-        } => {
-            // Update the rendered chapter in the book
-            if let Some(book) = &mut app.book {
-                if let Some(chapter) = book.chapters.get_mut(chapter_idx) {
-                    *chapter = rendered_chapter;
-                }
-
-                // Update loading state
-                if let LoadingState::RenderingChapters { rendered, total } = &mut app.loading_state
-                {
-                    *rendered = chapter_idx + 1;
-                    log::debug!("Rendered chapter {}/{}", rendered, total);
-                }
-            }
-        }
-
-        TaskMessage::AllChaptersRendered => {
-            log::info!("All chapters rendered");
             app.loading_state = LoadingState::Idle;
         }
 
@@ -370,7 +383,8 @@ fn handle_event(
     resize_tx: &mpsc::UnboundedSender<(u16, u16)>,
 ) -> Result<()> {
     match ev {
-        Event::Key(key) if key.kind == KeyEventKind::Press => {
+        Event::Key(key) => {
+            // Event is already filtered for Press in the reader task
             ui::handle_key_event(app, key)?;
         }
         Event::Resize(width, height) => {

@@ -7,46 +7,19 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use std::time::Instant;
-
-/// Spinner animation styles
-#[derive(Debug, Clone, Copy)]
-pub enum SpinnerStyle {
-    /// Braille dots: ⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
-    Dots,
-}
-
-impl SpinnerStyle {
-    fn frames(&self) -> &'static [&'static str] {
-        match self {
-            Self::Dots => &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
-        }
-    }
-
-    fn current_frame(&self, start_time: Instant) -> &'static str {
-        let frames = self.frames();
-        let elapsed_ms = start_time.elapsed().as_millis();
-        let idx = (elapsed_ms / 80) as usize % frames.len();
-        frames[idx]
-    }
-}
 
 /// Loading indicator with optional progress
 pub struct LoadingWidget {
-    style: SpinnerStyle,
     message: String,
     progress: Option<(usize, usize)>, // (current, total)
-    start_time: Instant,
 }
 
 impl LoadingWidget {
     /// Create a new loading widget
     pub fn new(message: impl Into<String>) -> Self {
         Self {
-            style: SpinnerStyle::Dots,
             message: message.into(),
             progress: None,
-            start_time: Instant::now(),
         }
     }
 
@@ -58,8 +31,6 @@ impl LoadingWidget {
 
     /// Render the loading widget as a centered popup
     pub fn render(&self, f: &mut Frame, area: Rect) {
-        let spinner_char = self.style.current_frame(self.start_time);
-
         let lines = if let Some((current, total)) = self.progress {
             // With progress bar
             let percentage = if total > 0 {
@@ -77,7 +48,7 @@ impl LoadingWidget {
             vec![
                 Line::from(vec![
                     Span::styled(
-                        spinner_char,
+                        "⏳",
                         Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
@@ -96,10 +67,10 @@ impl LoadingWidget {
                 )]),
             ]
         } else {
-            // Just spinner
+            // Just loading message
             vec![Line::from(vec![
                 Span::styled(
-                    spinner_char,
+                    "⏳",
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
@@ -121,14 +92,17 @@ impl LoadingWidget {
                 ),
         );
 
-        // Center the widget
-        let area = centered_rect(60, 8, area);
+        // Center the widget - width based on content
+        // Progress bar (40) + borders (2) + padding (4) = 46
+        let width = 46;
+        let height = 8;
+        let area = centered_rect_fixed(width, height, area);
         f.render_widget(paragraph, area);
     }
 }
 
-/// Helper function to create a centered rect
-fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
+/// Helper function to create a centered rect with fixed dimensions
+fn centered_rect_fixed(width: u16, height: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -141,9 +115,9 @@ fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
     Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Length((r.width.saturating_sub(width)) / 2),
+            Constraint::Length(width),
+            Constraint::Length((r.width.saturating_sub(width)) / 2),
         ])
         .split(popup_layout[1])[1]
 }
