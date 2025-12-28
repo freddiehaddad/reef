@@ -2,7 +2,7 @@
 name = "reef"
 version = "0.0.1"
 edition = "2024"
-description = "Dive into your ePub books from the comfort of your terminal!"
+description = "A terminal-based EPUB reader for reading ebooks from the command line."
 license = "MIT"
 
 [dependencies]
