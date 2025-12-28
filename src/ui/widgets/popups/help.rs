@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
@@ -20,6 +20,9 @@ pub fn render_help_popup(f: &mut Frame, _area: Rect) {
         width: popup_width,
         height: popup_height,
     };
+    
+    // Clear the area behind the popup
+    f.render_widget(Clear, popup_area);
     
     // Create help text
     let help_text = vec![

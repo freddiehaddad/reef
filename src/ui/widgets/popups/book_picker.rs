@@ -1,13 +1,16 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
 
 pub fn render_book_picker(f: &mut Frame, books: &[String], selected_idx: Option<usize>) {
     // Create a centered popup (60% width, 60% height)
     let area = centered_rect(60, 60, f.area());
+    
+    // Clear the area behind the popup
+    f.render_widget(Clear, area);
     
     // Create the block
     let block = Block::default()

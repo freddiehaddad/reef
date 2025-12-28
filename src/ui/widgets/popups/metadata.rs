@@ -3,13 +3,16 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
 pub fn render_metadata_popup(f: &mut Frame, metadata: &BookMetadata) {
     // Create a centered popup (50% width, 50% height)
     let area = centered_rect(50, 50, f.area());
+    
+    // Clear the area behind the popup
+    f.render_widget(Clear, area);
     
     // Create the block
     let block = Block::default()
