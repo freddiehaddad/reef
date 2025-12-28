@@ -27,9 +27,9 @@ struct SectionInfo {
 ///
 /// # Example
 /// ```no_run
-/// # use epub_reader::epub::parse_epub;
+/// # use reef::epub::parse_epub;
 /// let book = parse_epub("mybook.epub")?;
-/// # Ok::<(), epub_reader::error::AppError>(())
+/// # Ok::<(), reef::error::AppError>(())
 /// ```
 pub fn parse_epub<P: AsRef<Path>>(path: P) -> Result<Book> {
     let path_str = path.as_ref().to_string_lossy().to_string();
@@ -242,5 +242,38 @@ fn process_nav_point(
     // Recursively process all children - no depth limit!
     for child in &nav_point.children {
         process_nav_point(child, toc_map, Some(base_path.clone()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_nonexistent_file() {
+        let result = parse_epub("/nonexistent/path/to/book.epub");
+        assert!(result.is_err());
+        match result {
+            Err(AppError::FileNotFound(_)) => {}
+            _ => panic!("Expected FileNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_extract_fragment_id() {
+        // Test extracting fragment from URL
+        let url1 = "text/chapter1.xhtml#section-2";
+        assert_eq!(url1.split('#').nth(1), Some("section-2"));
+
+        let url2 = "chapter1.xhtml";
+        assert_eq!(url2.split('#').nth(1), None);
+    }
+
+    #[test]
+    fn test_spine_id_conversion() {
+        // Test filename to spine ID conversion logic
+        let filename = "ch003.xhtml";
+        let potential_id = filename.replace('.', "_");
+        assert_eq!(potential_id, "ch003_xhtml");
     }
 }

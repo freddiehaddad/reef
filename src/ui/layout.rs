@@ -1,3 +1,8 @@
+//! Main UI layout and rendering
+//!
+//! This module handles the overall layout of the application UI,
+//! including title bar, status bar, content area, and side panels.
+
 use crate::app::AppState;
 use crate::types::{FocusTarget, LineStyle, LoadingState, UiMode};
 use crate::ui::widgets;

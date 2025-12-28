@@ -1,3 +1,8 @@
+//! Keyboard input handling
+//!
+//! This module processes keyboard events and routes them to the appropriate
+//! handlers based on current UI mode and focus state.
+
 use crate::app::AppState;
 use crate::constants::{MAX_BOOKMARK_INPUT_LENGTH, MAX_SEARCH_INPUT_LENGTH};
 use crate::error::Result;
@@ -352,173 +357,140 @@ impl InputHandler {
 
         match key.code {
             // Clear search highlights
-            KeyCode::Esc => {
-                if !app.search_results.is_empty() {
-                    // Clear highlights from book
-                    if let Some(book) = &mut app.book {
-                        crate::search::SearchEngine::clear_highlights(book);
-                    }
+            KeyCode::Esc => Self::handle_escape(app),
 
-                    // Clear search state
-                    app.search_results.clear();
-                    app.search_query.clear();
-                    app.current_search_idx = 0;
-                }
-            }
+            // Scrolling keys
+            KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => app.half_page_down(),
+            KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => app.half_page_up(),
+            KeyCode::Char('j') | KeyCode::Down => app.scroll_down(1),
+            KeyCode::Char('k') | KeyCode::Up => app.scroll_up(1),
 
-            // Half page scrolling with Ctrl+arrows (must come before regular arrow keys)
-            KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.half_page_down();
-            }
-            KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.half_page_up();
-            }
-
-            // Scrolling (j/k moves viewport, cursor follows)
-            KeyCode::Char('j') | KeyCode::Down => {
-                app.scroll_down(1);
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                app.scroll_up(1);
-            }
-
-            // Chapter navigation with Ctrl+PageUp/PageDown (must come before regular PageUp/PageDown)
+            // Page navigation
             KeyCode::PageUp if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.previous_chapter();
+                app.previous_chapter()
             }
             KeyCode::PageDown if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.next_chapter();
+                app.next_chapter()
             }
-
-            // Page scrolling - Space and PageDown
-            KeyCode::Char(' ') => {
-                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    app.page_up();
-                } else {
-                    app.page_down();
-                }
-            }
-            KeyCode::PageDown => {
-                app.page_down();
-            }
-            // Ctrl-f for page down
-            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.page_down();
-            }
-            // Ctrl-b and PageUp for page up
-            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.page_up();
-            }
-            KeyCode::PageUp => {
-                app.page_up();
-            }
-            // Half page scrolling with Ctrl+d/u
+            KeyCode::Char(' ') => Self::handle_space(app, key),
+            KeyCode::PageDown => app.page_down(),
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => app.page_down(),
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => app.page_up(),
+            KeyCode::PageUp => app.page_up(),
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.half_page_down();
+                app.half_page_down()
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                app.half_page_up();
+                app.half_page_up()
             }
 
             // Cycle max width
-            KeyCode::Char('w') => {
-                app.cycle_max_width();
-            }
+            KeyCode::Char('w') => app.cycle_max_width(),
 
             // Search
-            KeyCode::Char('/') => {
-                app.previous_focus = Some(app.focus.clone());
-                app.ui_mode = UiMode::SearchPopup;
-                app.input_buffer.clear();
-            }
-            KeyCode::Char('n') => {
-                app.next_search_result();
-            }
-            KeyCode::Char('N') => {
-                app.previous_search_result();
-            }
+            KeyCode::Char('/') => Self::open_search_popup(app),
+            KeyCode::Char('n') => app.next_search_result(),
+            KeyCode::Char('N') => app.previous_search_result(),
 
             // Bookmarks
             KeyCode::Char('m') | KeyCode::Char('M')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                app.previous_focus = Some(app.focus.clone());
-                app.ui_mode = UiMode::BookmarkPrompt;
-                app.input_buffer.clear();
+                Self::open_bookmark_prompt(app)
             }
 
             // Help
-            KeyCode::Char('?') | KeyCode::F(1) => {
-                app.previous_focus = Some(app.focus.clone());
-                app.ui_mode = UiMode::Help;
-            }
+            KeyCode::Char('?') | KeyCode::F(1) => Self::open_help(app),
 
             // Metadata popup
-            KeyCode::Char('I') => {
-                app.previous_focus = Some(app.focus.clone());
-                app.ui_mode = UiMode::MetadataPopup;
-            }
+            KeyCode::Char('I') => Self::open_metadata_popup(app),
 
             // Book picker
             KeyCode::Char('o') | KeyCode::Char('O')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                app.previous_focus = Some(app.focus.clone());
-                app.ui_mode = UiMode::BookPicker;
-
-                // Set selection to current book if available
-                if let Some(current_path) = &app.current_book_path {
-                    app.book_picker_selected_idx = app
-                        .recent_books
-                        .iter()
-                        .position(|p| p == current_path)
-                        .or(Some(0));
-                } else {
-                    app.book_picker_selected_idx = Some(0);
-                }
+                Self::open_book_picker(app)
             }
 
             // Cursor movement
-            KeyCode::Char('H') => {
-                app.move_cursor_to_top();
-            }
-            KeyCode::Char('M') => {
-                app.move_cursor_to_middle();
-            }
-            KeyCode::Char('L') => {
-                app.move_cursor_to_bottom();
-            }
-            KeyCode::Char('g') | KeyCode::Home => {
-                app.move_cursor_to_chapter_start();
-            }
-            KeyCode::Char('G') | KeyCode::End => {
-                app.move_cursor_to_chapter_end();
-            }
+            KeyCode::Char('H') => app.move_cursor_to_top(),
+            KeyCode::Char('M') => app.move_cursor_to_middle(),
+            KeyCode::Char('L') => app.move_cursor_to_bottom(),
+            KeyCode::Char('g') | KeyCode::Home => app.move_cursor_to_chapter_start(),
+            KeyCode::Char('G') | KeyCode::End => app.move_cursor_to_chapter_end(),
 
             // Chapter navigation
-            KeyCode::Char('{') => {
-                app.previous_chapter();
-            }
-            KeyCode::Char('}') => {
-                app.next_chapter();
-            }
+            KeyCode::Char('{') => app.previous_chapter(),
+            KeyCode::Char('}') => app.next_chapter(),
 
             // Section navigation
-            KeyCode::Char('[') => {
-                app.previous_section();
-            }
-            KeyCode::Char(']') => {
-                app.next_section();
-            }
-            KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => {
-                app.previous_section();
-            }
-            KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => {
-                app.next_section();
-            }
+            KeyCode::Char('[') => app.previous_section(),
+            KeyCode::Char(']') => app.next_section(),
+            KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => app.previous_section(),
+            KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => app.next_section(),
 
             _ => {}
         }
         Ok(())
+    }
+
+    fn handle_escape(app: &mut AppState) {
+        if !app.search_results.is_empty() {
+            // Clear highlights from book
+            if let Some(book) = &mut app.book {
+                crate::search::SearchEngine::clear_highlights(book);
+            }
+
+            // Clear search state
+            app.search_results.clear();
+            app.search_query.clear();
+            app.current_search_idx = 0;
+        }
+    }
+
+    fn handle_space(app: &mut AppState, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::SHIFT) {
+            app.page_up();
+        } else {
+            app.page_down();
+        }
+    }
+
+    fn open_search_popup(app: &mut AppState) {
+        app.previous_focus = Some(app.focus.clone());
+        app.ui_mode = UiMode::SearchPopup;
+        app.input_buffer.clear();
+    }
+
+    fn open_bookmark_prompt(app: &mut AppState) {
+        app.previous_focus = Some(app.focus.clone());
+        app.ui_mode = UiMode::BookmarkPrompt;
+        app.input_buffer.clear();
+    }
+
+    fn open_help(app: &mut AppState) {
+        app.previous_focus = Some(app.focus.clone());
+        app.ui_mode = UiMode::Help;
+    }
+
+    fn open_metadata_popup(app: &mut AppState) {
+        app.previous_focus = Some(app.focus.clone());
+        app.ui_mode = UiMode::MetadataPopup;
+    }
+
+    fn open_book_picker(app: &mut AppState) {
+        app.previous_focus = Some(app.focus.clone());
+        app.ui_mode = UiMode::BookPicker;
+
+        // Set selection to current book if available
+        if let Some(current_path) = &app.current_book_path {
+            app.book_picker_selected_idx = app
+                .recent_books
+                .iter()
+                .position(|p| p == current_path)
+                .or(Some(0));
+        } else {
+            app.book_picker_selected_idx = Some(0);
+        }
     }
 }

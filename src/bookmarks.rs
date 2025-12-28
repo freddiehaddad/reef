@@ -1,4 +1,10 @@
-use crate::types::Bookmark;
+//! Bookmark management functionality
+//!
+//! This module provides utilities for managing user bookmarks, including
+//! creation, navigation, and deletion. Bookmarks are automatically sorted
+//! by position (chapter index, then line number).
+
+use crate::types::{Bookmark, Viewport};
 
 const MAX_BOOKMARKS: usize = 1000;
 const MAX_LABEL_LENGTH: usize = 100;
@@ -123,6 +129,77 @@ impl BookmarkManager {
             format!("{}...", &trimmed[..max_len.saturating_sub(3)])
         }
     }
+
+    /// Navigate to the next bookmark in the list
+    pub fn next(bookmarks: &[Bookmark], selected_idx: Option<usize>) -> Option<usize> {
+        if bookmarks.is_empty() {
+            return None;
+        }
+
+        let current_idx = selected_idx.unwrap_or(0);
+        Some((current_idx + 1) % bookmarks.len())
+    }
+
+    /// Navigate to the previous bookmark in the list
+    pub fn previous(bookmarks: &[Bookmark], selected_idx: Option<usize>) -> Option<usize> {
+        if bookmarks.is_empty() {
+            return None;
+        }
+
+        let current_idx = selected_idx.unwrap_or(0);
+        if current_idx == 0 {
+            Some(bookmarks.len() - 1)
+        } else {
+            Some(current_idx - 1)
+        }
+    }
+
+    /// Get the position to jump to for a selected bookmark
+    ///
+    /// # Returns
+    /// * `Some((chapter_idx, line, scroll_offset))` - Position to jump to
+    /// * `None` - Invalid selection
+    pub fn get_jump_position(
+        bookmarks: &[Bookmark],
+        selected_idx: Option<usize>,
+        viewport: &Viewport,
+    ) -> Option<(usize, usize, usize)> {
+        if let Some(idx) = selected_idx
+            && let Some(bookmark) = bookmarks.get(idx)
+        {
+            let half_viewport = viewport.height as usize / 2;
+            let scroll_offset = bookmark.line.saturating_sub(half_viewport);
+            Some((bookmark.chapter_idx, bookmark.line, scroll_offset))
+        } else {
+            None
+        }
+    }
+
+    /// Delete a bookmark and return the new selected index
+    ///
+    /// # Returns
+    /// * `Some(usize)` - New selected index
+    /// * `None` - No bookmarks remaining
+    pub fn delete(bookmarks: &mut Vec<Bookmark>, selected_idx: Option<usize>) -> Option<usize> {
+        if let Some(idx) = selected_idx
+            && idx < bookmarks.len()
+        {
+            bookmarks.remove(idx);
+
+            // Update selection
+            if bookmarks.is_empty() {
+                None
+            } else if idx >= bookmarks.len() {
+                // Was at last bookmark, move to previous
+                Some(bookmarks.len() - 1)
+            } else {
+                // Keep same index (moves to next bookmark)
+                Some(idx)
+            }
+        } else {
+            selected_idx
+        }
+    }
 }
 
 #[cfg(test)]
@@ -184,5 +261,61 @@ mod tests {
     fn test_generate_label_empty() {
         let suggestion = BookmarkManager::generate_label_suggestion("", "");
         assert_eq!(suggestion, None);
+    }
+
+    #[test]
+    fn test_bookmark_navigation() {
+        let bookmarks = vec![
+            Bookmark {
+                chapter_idx: 0,
+                line: 10,
+                label: "First".to_string(),
+            },
+            Bookmark {
+                chapter_idx: 1,
+                line: 20,
+                label: "Second".to_string(),
+            },
+            Bookmark {
+                chapter_idx: 2,
+                line: 30,
+                label: "Third".to_string(),
+            },
+        ];
+
+        // Test next
+        assert_eq!(BookmarkManager::next(&bookmarks, Some(0)), Some(1));
+        assert_eq!(BookmarkManager::next(&bookmarks, Some(2)), Some(0)); // Wraps
+
+        // Test previous
+        assert_eq!(BookmarkManager::previous(&bookmarks, Some(1)), Some(0));
+        assert_eq!(BookmarkManager::previous(&bookmarks, Some(0)), Some(2)); // Wraps
+    }
+
+    #[test]
+    fn test_bookmark_delete() {
+        let mut bookmarks = vec![
+            Bookmark {
+                chapter_idx: 0,
+                line: 10,
+                label: "First".to_string(),
+            },
+            Bookmark {
+                chapter_idx: 1,
+                line: 20,
+                label: "Second".to_string(),
+            },
+        ];
+
+        // Delete first bookmark
+        let new_idx = BookmarkManager::delete(&mut bookmarks, Some(0));
+        assert_eq!(new_idx, Some(0)); // Points to what was second
+        assert_eq!(bookmarks.len(), 1);
+        assert_eq!(bookmarks[0].label, "Second");
+
+        // Delete last remaining bookmark
+        let new_idx = BookmarkManager::delete(&mut bookmarks, Some(0));
+        assert_eq!(new_idx, None);
+        assert_eq!(bookmarks.len(), 0);
     }
 }

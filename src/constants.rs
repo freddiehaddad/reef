@@ -47,3 +47,9 @@ pub const MIN_BOOKMARKS_PANEL_WIDTH: u16 = 20;
 
 /// Maximum width for bookmarks panel
 pub const MAX_BOOKMARKS_PANEL_WIDTH: u16 = 80;
+
+/// Frame duration in milliseconds for the UI render loop (targeting 60 FPS)
+pub const FRAME_DURATION_MS: u64 = 16;
+
+/// Debounce timeout for terminal resize events in milliseconds
+pub const RESIZE_DEBOUNCE_MS: u64 = 200;

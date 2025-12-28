@@ -1,3 +1,8 @@
+//! Application state and core business logic
+//!
+//! This module contains the main application state (`AppState`) and all
+//! the methods for managing UI state, navigation, and user interactions.
+
 use crate::constants::{
     DEFAULT_TERMINAL_HEIGHT, DEFAULT_TERMINAL_WIDTH, WIDTH_PRESET_1, WIDTH_PRESET_2, WIDTH_PRESET_3,
 };
@@ -9,6 +14,7 @@ use crate::types::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// Main application state containing all UI and data state
 pub struct AppState {
     pub book: Option<Book>,
     pub viewport: Viewport,
@@ -59,6 +65,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Create a new application state with default settings
     pub fn new(config: Config, persistence: PersistenceManager) -> Self {
         let reading_progress = persistence.load_reading_progress().unwrap_or_default();
         let recent_books = persistence.load_recent_books().unwrap_or_default();
@@ -105,6 +112,7 @@ impl AppState {
         self.toc_state.items = TocManager::build_tree(book);
     }
 
+    /// Toggle the table of contents panel visibility
     pub fn toggle_toc(&mut self) {
         self.toc_panel_visible = !self.toc_panel_visible;
         log::debug!(
@@ -130,6 +138,7 @@ impl AppState {
         self.rerender_chapters();
     }
 
+    /// Toggle the bookmarks panel visibility
     pub fn toggle_bookmarks(&mut self) {
         self.bookmarks_panel_visible = !self.bookmarks_panel_visible;
 
@@ -158,6 +167,7 @@ impl AppState {
         self.update_viewport_from_terminal();
     }
 
+    /// Toggle zen mode (hide all UI elements for distraction-free reading)
     pub fn toggle_zen_mode(&mut self) {
         if self.zen_mode_active {
             // Exiting zen mode - restore previous state
@@ -291,6 +301,7 @@ impl AppState {
         self.toc_state.tree_state.toggle_selected();
     }
 
+    /// Close/collapse the currently selected TOC item
     pub fn toc_close(&mut self) {
         if let Some(selected) = self.toc_state.tree_state.selected().first() {
             let selected_id = selected.clone();
@@ -302,6 +313,7 @@ impl AppState {
         }
     }
 
+    /// Jump to the position of the currently selected TOC item
     pub fn toc_select(&mut self) {
         // Get selected item ID - use LAST element of path for leaf nodes (sections)
         let selected_id = match self.toc_state.tree_state.selected().last() {
@@ -373,22 +385,26 @@ impl AppState {
         }
     }
 
+    /// Get the currently displayed chapter
     pub fn get_current_chapter(&self) -> Option<&crate::types::Chapter> {
         self.book
             .as_ref()
             .and_then(|b| b.chapters.get(self.current_chapter))
     }
 
+    /// Get total number of chapters in the current book
     pub fn total_chapters(&self) -> usize {
         self.book.as_ref().map(|b| b.chapters.len()).unwrap_or(0)
     }
 
+    /// Get the number of lines in the current chapter
     pub fn current_chapter_lines(&self) -> usize {
         self.get_current_chapter()
             .map(|ch| ch.content_lines.len())
             .unwrap_or(0)
     }
 
+    /// Scroll down by the specified number of lines
     pub fn scroll_down(&mut self, lines: usize) {
         let max_lines = self.current_chapter_lines();
         if max_lines == 0 {
@@ -407,6 +423,7 @@ impl AppState {
         }
     }
 
+    /// Scroll up by the specified number of lines
     pub fn scroll_up(&mut self, lines: usize) {
         self.viewport.scroll_offset = self.viewport.scroll_offset.saturating_sub(lines);
 
@@ -451,6 +468,7 @@ impl AppState {
         }
     }
 
+    /// Navigate to the next chapter (wraps to first chapter)
     pub fn next_chapter(&mut self) {
         let total = self.total_chapters();
         if total == 0 {
@@ -472,6 +490,7 @@ impl AppState {
         self.sync_toc_to_cursor();
     }
 
+    /// Navigate to the previous chapter (wraps to last chapter)
     pub fn previous_chapter(&mut self) {
         let total = self.total_chapters();
         if total == 0 {
@@ -680,39 +699,28 @@ impl AppState {
 
     // Bookmark methods
     pub fn bookmark_next(&mut self) {
-        if self.bookmarks.is_empty() {
-            return;
-        }
-
-        let current_idx = self.selected_bookmark_idx.unwrap_or(0);
-        let next_idx = (current_idx + 1) % self.bookmarks.len();
-        self.selected_bookmark_idx = Some(next_idx);
+        self.selected_bookmark_idx =
+            crate::bookmarks::BookmarkManager::next(&self.bookmarks, self.selected_bookmark_idx);
     }
 
     pub fn bookmark_previous(&mut self) {
-        if self.bookmarks.is_empty() {
-            return;
-        }
-
-        let current_idx = self.selected_bookmark_idx.unwrap_or(0);
-        let next_idx = if current_idx == 0 {
-            self.bookmarks.len() - 1
-        } else {
-            current_idx - 1
-        };
-        self.selected_bookmark_idx = Some(next_idx);
+        self.selected_bookmark_idx = crate::bookmarks::BookmarkManager::previous(
+            &self.bookmarks,
+            self.selected_bookmark_idx,
+        );
     }
 
     pub fn jump_to_selected_bookmark(&mut self) {
-        if let Some(idx) = self.selected_bookmark_idx
-            && let Some(bookmark) = self.bookmarks.get(idx)
+        if let Some((chapter_idx, line, scroll_offset)) =
+            crate::bookmarks::BookmarkManager::get_jump_position(
+                &self.bookmarks,
+                self.selected_bookmark_idx,
+                &self.viewport,
+            )
         {
-            self.current_chapter = bookmark.chapter_idx;
-            self.cursor_line = bookmark.line;
-
-            // Center the line in viewport
-            let half_viewport = self.viewport.height as usize / 2;
-            self.viewport.scroll_offset = bookmark.line.saturating_sub(half_viewport);
+            self.current_chapter = chapter_idx;
+            self.cursor_line = line;
+            self.viewport.scroll_offset = scroll_offset;
 
             // Sync TOC
             self.sync_toc_to_cursor();
@@ -720,53 +728,43 @@ impl AppState {
     }
 
     pub fn delete_selected_bookmark(&mut self) {
-        if let Some(idx) = self.selected_bookmark_idx
-            && idx < self.bookmarks.len()
-        {
-            self.bookmarks.remove(idx);
-
-            // Update selection
-            if self.bookmarks.is_empty() {
-                self.selected_bookmark_idx = None;
-            } else if idx >= self.bookmarks.len() {
-                // Was at last bookmark, move to previous
-                self.selected_bookmark_idx = Some(self.bookmarks.len() - 1);
-            }
-            // Otherwise, keep same index (moves to next bookmark)
-        }
+        self.selected_bookmark_idx = crate::bookmarks::BookmarkManager::delete(
+            &mut self.bookmarks,
+            self.selected_bookmark_idx,
+        );
     }
 
     // Search methods
     pub fn next_search_result(&mut self) {
-        if self.search_results.is_empty() {
-            return;
-        }
+        if let Some((new_idx, chapter_idx, line, scroll_offset)) =
+            crate::search::SearchEngine::next_result(
+                &self.search_results,
+                self.current_search_idx,
+                &self.viewport,
+            )
+        {
+            self.current_search_idx = new_idx;
+            self.current_chapter = chapter_idx;
+            self.cursor_line = line;
+            self.viewport.scroll_offset = scroll_offset;
 
-        self.current_search_idx = (self.current_search_idx + 1) % self.search_results.len();
-        self.jump_to_current_search_result();
+            // Sync TOC
+            self.sync_toc_to_cursor();
+        }
     }
 
     pub fn previous_search_result(&mut self) {
-        if self.search_results.is_empty() {
-            return;
-        }
-
-        if self.current_search_idx == 0 {
-            self.current_search_idx = self.search_results.len() - 1;
-        } else {
-            self.current_search_idx -= 1;
-        }
-        self.jump_to_current_search_result();
-    }
-
-    fn jump_to_current_search_result(&mut self) {
-        if let Some(result) = self.search_results.get(self.current_search_idx) {
-            self.current_chapter = result.chapter_idx;
-            self.cursor_line = result.line;
-
-            // Center the line in viewport
-            let half_viewport = self.viewport.height as usize / 2;
-            self.viewport.scroll_offset = result.line.saturating_sub(half_viewport);
+        if let Some((new_idx, chapter_idx, line, scroll_offset)) =
+            crate::search::SearchEngine::previous_result(
+                &self.search_results,
+                self.current_search_idx,
+                &self.viewport,
+            )
+        {
+            self.current_search_idx = new_idx;
+            self.current_chapter = chapter_idx;
+            self.cursor_line = line;
+            self.viewport.scroll_offset = scroll_offset;
 
             // Sync TOC
             self.sync_toc_to_cursor();
@@ -774,6 +772,7 @@ impl AppState {
     }
 
     // Persistence methods
+    /// Save current reading state, bookmarks, and configuration to disk
     pub fn save_state(&mut self) -> anyhow::Result<()> {
         // Save current book progress if we have one
         if let Some(book_path) = &self.current_book_path {
@@ -805,6 +804,7 @@ impl AppState {
         Ok(())
     }
 
+    /// Load a book from file path and restore reading progress
     pub fn load_book_with_path(&mut self, book_path: String) -> anyhow::Result<()> {
         use crate::persistence::canonicalize_path;
 

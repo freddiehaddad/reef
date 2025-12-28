@@ -655,3 +655,117 @@ fn process_navigation(
 
     add_blank_line(lines);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_chapter(html_content: &str) -> Chapter {
+        Chapter {
+            title: "Test Chapter".to_string(),
+            sections: Vec::new(),
+            content_lines: Vec::new(),
+            file_path: html_content.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_render_simple_paragraph() {
+        let html = "<p>This is a simple paragraph.</p>";
+        let mut chapter = create_test_chapter(html);
+
+        render_chapter(&mut chapter, Some(80), 100);
+
+        assert!(!chapter.content_lines.is_empty());
+        assert!(
+            chapter.content_lines[0]
+                .text
+                .contains("This is a simple paragraph")
+        );
+    }
+
+    #[test]
+    fn test_render_heading() {
+        let html = "<h1>Main Heading</h1><p>Content here.</p>";
+        let mut chapter = create_test_chapter(html);
+
+        render_chapter(&mut chapter, Some(80), 100);
+
+        assert!(!chapter.content_lines.is_empty());
+        // Find the heading line
+        let heading_line = chapter
+            .content_lines
+            .iter()
+            .find(|line| line.style == LineStyle::Heading1);
+        assert!(heading_line.is_some());
+    }
+
+    #[test]
+    fn test_extract_sections_from_headings() {
+        let html = r#"
+            <h1>Chapter Title</h1>
+            <h2 id="section-1">Section 1</h2>
+            <p>Content</p>
+            <h2 id="section-2">Section 2</h2>
+            <p>More content</p>
+        "#;
+        let mut chapter = create_test_chapter(html);
+
+        render_chapter(&mut chapter, Some(80), 100);
+
+        // Should extract h2 headings as sections
+        assert!(chapter.sections.len() >= 2);
+        assert!(
+            chapter
+                .sections
+                .iter()
+                .any(|s| s.title.contains("Section 1"))
+        );
+        assert!(
+            chapter
+                .sections
+                .iter()
+                .any(|s| s.title.contains("Section 2"))
+        );
+    }
+
+    #[test]
+    fn test_word_wrapping() {
+        let long_text = "word ".repeat(50); // 250 characters
+        let html = format!("<p>{}</p>", long_text);
+        let mut chapter = create_test_chapter(&html);
+
+        render_chapter(&mut chapter, Some(40), 100);
+
+        // Should wrap into multiple lines
+        assert!(chapter.content_lines.len() > 1);
+        // Each line should be shorter than max width
+        for line in &chapter.content_lines {
+            assert!(line.text.len() <= 40 + 10); // +10 for some margin
+        }
+    }
+
+    #[test]
+    fn test_max_width_limiting() {
+        let html = "<p>Short text</p>";
+        let mut chapter = create_test_chapter(html);
+
+        // Set max_width smaller than terminal width
+        render_chapter(&mut chapter, Some(50), 200);
+
+        // Should use max_width, not terminal width
+        assert!(!chapter.content_lines.is_empty());
+    }
+
+    #[test]
+    fn test_empty_html() {
+        let html = "";
+        let mut chapter = create_test_chapter(html);
+
+        render_chapter(&mut chapter, Some(80), 100);
+
+        // Should handle empty content gracefully
+        // May have 0 or 1 empty line
+        assert!(chapter.content_lines.len() <= 1);
+    }
+}

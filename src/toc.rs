@@ -1,4 +1,8 @@
-//! Table of Contents management and synchronization
+//! Table of contents management and synchronization
+//!
+//! This module handles building and navigating the TOC tree structure,
+//! synchronizing TOC selection with reading position, and managing
+//! expansion state.
 
 use crate::types::{Book, Chapter, TocState};
 use std::collections::HashSet;

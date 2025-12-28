@@ -1,3 +1,8 @@
+//! User interface components and event handling
+//!
+//! This module contains all UI-related code including layout rendering,
+//! widgets, and keyboard input handling.
+
 pub mod input_handler;
 pub mod layout;
 pub mod widgets;

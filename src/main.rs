@@ -15,7 +15,7 @@ use app::AppState;
 use async_tasks::{AsyncTaskRunner, TaskMessage};
 use clap::Parser;
 use cli::Cli;
-use constants::{MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH};
+use constants::{FRAME_DURATION_MS, MIN_TERMINAL_HEIGHT, MIN_TERMINAL_WIDTH, RESIZE_DEBOUNCE_MS};
 use crossterm::{
     cursor::{Hide, Show},
     event::{self, Event, KeyEventKind},
@@ -163,7 +163,7 @@ async fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
     let task_runner = AsyncTaskRunner::new(task_tx);
 
     // Create resize debouncer
-    let resize_tx = task_runner.spawn_resize_debouncer(200); // 200ms debounce
+    let resize_tx = task_runner.spawn_resize_debouncer(RESIZE_DEBOUNCE_MS);
 
     // Load initial book or show picker
     load_initial_book(&mut app, &cli, &task_runner)?;
@@ -262,8 +262,7 @@ async fn run_event_loop(
     running: Arc<AtomicBool>,
     resize_tx: &mpsc::UnboundedSender<(u16, u16)>,
 ) -> Result<()> {
-    // Target 60 FPS = ~16ms per frame
-    let frame_duration = Duration::from_millis(16);
+    let frame_duration = Duration::from_millis(FRAME_DURATION_MS);
 
     while running.load(Ordering::SeqCst) && !app.should_quit {
         let frame_start = Instant::now();

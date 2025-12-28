@@ -1,4 +1,9 @@
-use crate::types::{Book, SearchMatch};
+//! Full-text search functionality for EPUB content
+//!
+//! This module provides regex-based search across all chapters and lines,
+//! with highlighting support and result navigation.
+
+use crate::types::{Book, SearchMatch, Viewport};
 use regex::Regex;
 use std::time::{Duration, Instant};
 
@@ -74,6 +79,59 @@ impl SearchEngine {
             start_time.elapsed()
         );
         Ok(results)
+    }
+
+    /// Navigate to the next search result
+    ///
+    /// # Returns
+    /// * `Some((new_idx, chapter_idx, line, scroll_offset))` - New position to jump to
+    /// * `None` - No search results available
+    pub fn next_result(
+        results: &[SearchMatch],
+        current_idx: usize,
+        viewport: &Viewport,
+    ) -> Option<(usize, usize, usize, usize)> {
+        if results.is_empty() {
+            return None;
+        }
+
+        let new_idx = (current_idx + 1) % results.len();
+        SearchEngine::get_jump_position(results, new_idx, viewport)
+    }
+
+    /// Navigate to the previous search result
+    ///
+    /// # Returns
+    /// * `Some((new_idx, chapter_idx, line, scroll_offset))` - New position to jump to
+    /// * `None` - No search results available
+    pub fn previous_result(
+        results: &[SearchMatch],
+        current_idx: usize,
+        viewport: &Viewport,
+    ) -> Option<(usize, usize, usize, usize)> {
+        if results.is_empty() {
+            return None;
+        }
+
+        let new_idx = if current_idx == 0 {
+            results.len() - 1
+        } else {
+            current_idx - 1
+        };
+        SearchEngine::get_jump_position(results, new_idx, viewport)
+    }
+
+    /// Get the position to jump to for a search result
+    fn get_jump_position(
+        results: &[SearchMatch],
+        idx: usize,
+        viewport: &Viewport,
+    ) -> Option<(usize, usize, usize, usize)> {
+        results.get(idx).map(|result| {
+            let half_viewport = viewport.height as usize / 2;
+            let scroll_offset = result.line.saturating_sub(half_viewport);
+            (idx, result.chapter_idx, result.line, scroll_offset)
+        })
     }
 
     /// Apply search match highlighting to rendered lines
@@ -175,5 +233,32 @@ mod tests {
         let book = create_test_book();
         let results = SearchEngine::search(&book, "nonexistent").unwrap();
         assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_search_navigation() {
+        let book = create_test_book();
+        let results = SearchEngine::search(&book, "test").unwrap();
+        let viewport = crate::types::Viewport {
+            width: 80,
+            height: 24,
+            scroll_offset: 0,
+        };
+
+        // Test next
+        let (new_idx, _, _, _) = SearchEngine::next_result(&results, 0, &viewport).unwrap();
+        assert_eq!(new_idx, 1);
+
+        // Test wrapping
+        let (new_idx, _, _, _) = SearchEngine::next_result(&results, 1, &viewport).unwrap();
+        assert_eq!(new_idx, 0);
+
+        // Test previous
+        let (new_idx, _, _, _) = SearchEngine::previous_result(&results, 1, &viewport).unwrap();
+        assert_eq!(new_idx, 0);
+
+        // Test wrapping backward
+        let (new_idx, _, _, _) = SearchEngine::previous_result(&results, 0, &viewport).unwrap();
+        assert_eq!(new_idx, 1);
     }
 }

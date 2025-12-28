@@ -1,3 +1,8 @@
+//! Command-line interface parsing and validation
+//!
+//! This module handles CLI argument parsing using clap and validates
+//! user inputs for correctness.
+
 use crate::constants::{MAX_MAX_WIDTH, MIN_MAX_WIDTH};
 use clap::Parser;
 
