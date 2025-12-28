@@ -141,6 +141,9 @@ impl AppState {
         if !self.toc_panel_visible && self.focus == FocusTarget::TOC {
             self.focus = FocusTarget::Content;
         }
+        
+        // Re-render chapters to account for changed available width
+        self.rerender_chapters();
     }
 
     pub fn toggle_bookmarks(&mut self) {
@@ -150,6 +153,9 @@ impl AppState {
         if !self.bookmarks_panel_visible && self.focus == FocusTarget::Bookmarks {
             self.focus = FocusTarget::Content;
         }
+        
+        // Re-render chapters to account for changed available width
+        self.rerender_chapters();
     }
 
     pub fn toggle_titlebar(&mut self) {
@@ -638,14 +644,33 @@ impl AppState {
             Some(_) => None, // Reset unknown values to None
         };
         
+        // Re-render chapters with new width
+        self.rerender_chapters();
+    }
+    
+    /// Re-render all chapters with current effective width
+    /// Call this when max-width changes or panel visibility changes
+    fn rerender_chapters(&mut self) {
         // Get effective width before borrowing book mutably
         let effective_width = self.effective_max_width();
-        let viewport_width = self.viewport.width;
         
-        // Re-render all chapters with new width if we have a book
+        // Calculate available content width accounting for panels and margins
+        let mut available_width = self.viewport.width;
+        
+        // Subtract TOC panel width and margin if visible
+        if self.toc_panel_visible {
+            available_width = available_width.saturating_sub(self.config.toc_panel_width + 1);
+        }
+        
+        // Subtract bookmarks panel width and margin if visible
+        if self.bookmarks_panel_visible {
+            available_width = available_width.saturating_sub(self.config.bookmarks_panel_width + 1);
+        }
+        
+        // Re-render all chapters with available width if we have a book
         if let Some(book) = &mut self.book {
             for chapter in &mut book.chapters {
-                crate::epub::render_chapter(chapter, effective_width, viewport_width);
+                crate::epub::render_chapter(chapter, effective_width, available_width);
             }
             
             // Re-apply search highlights if there are active results

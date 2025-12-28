@@ -156,6 +156,45 @@ fn render_titlebar(f: &mut Frame, app: &AppState, area: Rect) {
 }
 
 fn render_content(f: &mut Frame, app: &AppState, area: Rect) {
+    // Calculate the width that was used for text wrapping during chapter rendering
+    let available_width = area.width as usize;
+    
+    // Determine if centering should be applied
+    // Only center if: 1) max-width is set, 2) wrapped width < available width
+    let content_area = if let Some(max_width) = app.effective_max_width() {
+        // Chapters were rendered to min(max_width, viewport_width) - 4
+        let wrapped_width = max_width.min(app.viewport.width as usize).saturating_sub(4);
+        
+        // Only apply centering if the wrapped width is less than available width
+        // This prevents re-wrapping of already-wrapped text
+        if wrapped_width < available_width {
+            // Calculate padding to center the content
+            let total_padding = available_width - wrapped_width;
+            let left_padding = total_padding / 2; // Integer division
+            let right_padding = total_padding - left_padding; // Handles odd numbers
+            
+            // Create horizontal layout: [left_pad] [content] [right_pad]
+            let centered_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Length(left_padding as u16),
+                    Constraint::Length(wrapped_width as u16),
+                    Constraint::Length(right_padding as u16),
+                ])
+                .split(area);
+            
+            // Use the center chunk for rendering
+            centered_chunks[1]
+        } else {
+            // Wrapped width >= available width, use full area
+            // This may cause re-wrapping, but it's unavoidable
+            area
+        }
+    } else {
+        // No max-width set, content uses full available width
+        area
+    };
+    
     if let Some(chapter) = app.get_current_chapter() {
         let visible_start = app.viewport.scroll_offset;
         let visible_end = (visible_start + area.height as usize).min(chapter.content_lines.len());
@@ -230,12 +269,12 @@ fn render_content(f: &mut Frame, app: &AppState, area: Rect) {
             .block(Block::default().borders(Borders::NONE))
             .wrap(Wrap { trim: false });
         
-        f.render_widget(paragraph, area);
+        f.render_widget(paragraph, content_area);
     } else {
         let text = Paragraph::new("No book loaded")
             .style(Style::default().fg(Color::Gray))
             .alignment(ratatui::layout::Alignment::Center);
-        f.render_widget(text, area);
+        f.render_widget(text, content_area);
     }
 }
 
