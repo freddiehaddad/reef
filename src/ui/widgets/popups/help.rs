@@ -48,6 +48,7 @@ pub fn render_help_popup(f: &mut Frame, _area: Rect) {
         Line::from("  Ctrl-s             Toggle statusbar"),
         Line::from("  Ctrl-t             Toggle titlebar"),
         Line::from("  z                  Zen mode (hide all UI)"),
+        Line::from("  w                  Cycle text width (None/80/100/120)"),
         Line::from("  Shift-I            Show book metadata"),
         Line::from("  o / Ctrl-o         Open book picker"),
         Line::from(""),

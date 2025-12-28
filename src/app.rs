@@ -11,6 +11,9 @@ pub struct AppState {
     pub config: Config,
     pub should_quit: bool,
     
+    // Max width can be temporarily overridden by CLI (not persisted)
+    pub cli_max_width_override: Option<usize>,
+    
     // UI Mode
     pub ui_mode: UiMode,
     pub previous_focus: Option<FocusTarget>,
@@ -61,6 +64,7 @@ impl AppState {
             focus: FocusTarget::Content,
             config,
             should_quit: false,
+            cli_max_width_override: None,
             ui_mode: UiMode::Normal,
             previous_focus: None,
             toc_panel_visible: false,
@@ -552,6 +556,44 @@ impl AppState {
             (if self.titlebar_visible { 1 } else { 0 }) +
             (if self.statusbar_visible { 1 } else { 0 });
         self.viewport.height = height.saturating_sub(reserved_height);
+    }
+    
+    /// Get the effective max width (CLI override takes precedence over config)
+    pub fn effective_max_width(&self) -> Option<usize> {
+        self.cli_max_width_override.or(self.config.max_width)
+    }
+    
+    /// Cycle through max width presets: None -> 80 -> 100 -> 120 -> None
+    pub fn cycle_max_width(&mut self) {
+        let current = self.config.max_width;
+        self.config.max_width = match current {
+            None => Some(80),
+            Some(80) => Some(100),
+            Some(100) => Some(120),
+            Some(120) => None,
+            Some(_) => None, // Reset unknown values to None
+        };
+        
+        // Get effective width before borrowing book mutably
+        let effective_width = self.effective_max_width();
+        let viewport_width = self.viewport.width;
+        
+        // Re-render all chapters with new width if we have a book
+        if let Some(book) = &mut self.book {
+            for chapter in &mut book.chapters {
+                crate::epub::render_chapter(chapter, effective_width, viewport_width);
+            }
+            
+            // Re-apply search highlights if there are active results
+            if !self.search_results.is_empty() {
+                // Re-run search to recalculate match positions in new line structure
+                let search_query = self.search_query.clone();
+                if let Ok(new_results) = crate::search::SearchEngine::search(book, &search_query) {
+                    self.search_results = new_results;
+                    crate::search::SearchEngine::apply_highlights(book, &self.search_results);
+                }
+            }
+        }
     }
 
     // Bookmark methods

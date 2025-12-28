@@ -123,18 +123,18 @@ fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
         .map_err(|e| AppError::Other(format!("Failed to initialize persistence: {}", e)))?;
     
     // Load config
-    let mut config = persistence.load_config()
+    let config = persistence.load_config()
         .unwrap_or_else(|e| {
             tracing::warn!("Failed to load config: {}. Using defaults.", e);
             Config::default()
         });
-    
-    // Override with CLI arguments
-    if let Some(max_width) = cli.max_width {
-        config.max_width = Some(max_width);
-    }
 
     let mut app = AppState::new(config, persistence);
+    
+    // Set CLI max_width override (not persisted)
+    if let Some(max_width) = cli.max_width {
+        app.cli_max_width_override = Some(max_width);
+    }
     
     // Get terminal size and update viewport
     let (width, height) = crossterm::terminal::size()?;
@@ -153,8 +153,10 @@ fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
         );
 
         // Render all chapters
+        let effective_width = app.effective_max_width();
+        let viewport_width = app.viewport.width;
         for chapter in &mut book.chapters {
-            epub::render_chapter(chapter, app.config.max_width, app.viewport.width);
+            epub::render_chapter(chapter, effective_width, viewport_width);
         }
 
         // Load book with path (handles persistence)
@@ -162,9 +164,11 @@ fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
             .map_err(|e| AppError::Other(format!("Failed to load book: {}", e)))?;
         
         // Re-render with actual book content (in case of resize)
+        let effective_width = app.effective_max_width();
+        let viewport_width = app.viewport.width;
         if let Some(book) = &mut app.book {
             for chapter in &mut book.chapters {
-                epub::render_chapter(chapter, app.config.max_width, app.viewport.width);
+                epub::render_chapter(chapter, effective_width, viewport_width);
             }
         }
     } else {
@@ -196,15 +200,20 @@ fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
                     app.update_viewport_size(width, height);
                     
                     // Re-render all chapters with new width
+                    let effective_width = app.effective_max_width();
+                    let viewport_width = app.viewport.width;
+                    let search_query = app.search_query.clone();
+                    let has_search_results = !app.search_results.is_empty();
+                    
                     if let Some(book) = &mut app.book {
                         for chapter in &mut book.chapters {
-                            epub::render_chapter(chapter, app.config.max_width, app.viewport.width);
+                            epub::render_chapter(chapter, effective_width, viewport_width);
                         }
                         
                         // Re-apply search highlights if there are active results
-                        if !app.search_results.is_empty() {
+                        if has_search_results {
                             // Re-run search to recalculate match positions in new line structure
-                            if let Ok(new_results) = search::SearchEngine::search(book, &app.search_query) {
+                            if let Ok(new_results) = search::SearchEngine::search(book, &search_query) {
                                 app.search_results = new_results;
                                 search::SearchEngine::apply_highlights(book, &app.search_results);
                             }

@@ -160,9 +160,11 @@ fn handle_book_picker_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
                     match app.load_book_with_path(book_path.clone()) {
                         Ok(_) => {
                             // Render all chapters
+                            let effective_width = app.effective_max_width();
+                            let viewport_width = app.viewport.width;
                             if let Some(book) = &mut app.book {
                                 for chapter in &mut book.chapters {
-                                    crate::epub::render_chapter(chapter, app.config.max_width, app.viewport.width);
+                                    crate::epub::render_chapter(chapter, effective_width, viewport_width);
                                 }
                             }
                             app.ui_mode = UiMode::Normal;
@@ -432,6 +434,11 @@ fn handle_content_input(app: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Char('z') => {
             app.toggle_zen_mode();
+        }
+        
+        // Cycle max width
+        KeyCode::Char('w') => {
+            app.cycle_max_width();
         }
 
         // Search
