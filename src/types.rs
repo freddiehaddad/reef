@@ -87,6 +87,9 @@ pub struct RenderedLine {
     pub search_matches: Vec<(usize, usize)>,
     /// Inline text styles (start, end, style_type) for bold, italic, code, etc.
     pub inline_styles: Vec<(usize, usize, InlineStyle)>,
+    /// Syntax highlighting color spans (start, end, color) for code blocks
+    /// Each span defines a range of characters and their foreground color
+    pub syntax_colors: Vec<(usize, usize, ratatui::style::Color)>,
 }
 
 /// Visual style options for rendering text lines

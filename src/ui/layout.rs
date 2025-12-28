@@ -192,8 +192,11 @@ fn build_styled_line(
     current_search_idx: usize,
     current_chapter: usize,
 ) -> Line<'static> {
-    // If no inline styles and no search matches, use simple rendering
-    if line.inline_styles.is_empty() && line.search_matches.is_empty() {
+    // If no inline styles, no search matches, and no syntax colors, use simple rendering
+    if line.inline_styles.is_empty()
+        && line.search_matches.is_empty()
+        && line.syntax_colors.is_empty()
+    {
         let base_style = get_line_style(&line.style, line_idx, cursor_line);
         return Line::from(Span::styled(line.text.clone(), base_style));
     }
@@ -212,6 +215,12 @@ fn build_styled_line(
 
     // Add boundaries from inline styles
     for (start, end, _) in &line.inline_styles {
+        boundaries.push(*start);
+        boundaries.push(*end);
+    }
+
+    // Add boundaries from syntax highlighting colors
+    for (start, end, _) in &line.syntax_colors {
         boundaries.push(*start);
         boundaries.push(*end);
     }
@@ -254,11 +263,18 @@ fn build_styled_line(
             .map(|(_, _, style)| style.clone())
             .collect();
 
+        // Get syntax highlighting color for this region (if any)
+        let syntax_color = line
+            .syntax_colors
+            .iter()
+            .find(|(s_start, s_end, _)| start >= *s_start && end <= *s_end)
+            .map(|(_, _, color)| *color);
+
         // Build the style for this span
         let mut span_style = base_style;
 
         if let Some(is_current) = search_info {
-            // Search highlighting takes full precedence
+            // Search highlighting takes full precedence over everything
             let highlight_color = if is_current {
                 Color::Rgb(255, 200, 100) // Current match: bright yellow/orange
             } else {
@@ -266,7 +282,12 @@ fn build_styled_line(
             };
             span_style = span_style.bg(highlight_color).fg(Color::Black);
         } else {
-            // Apply inline styles
+            // Apply syntax highlighting color if present (takes precedence over base style)
+            if let Some(color) = syntax_color {
+                span_style = span_style.fg(color);
+            }
+
+            // Apply inline styles (bold, italic, etc.) on top
             for inline_style in applicable_inline_styles {
                 match inline_style {
                     InlineStyle::Bold => {
@@ -276,7 +297,10 @@ fn build_styled_line(
                         span_style = span_style.add_modifier(Modifier::ITALIC);
                     }
                     InlineStyle::Code => {
-                        span_style = span_style.fg(Color::Cyan);
+                        // Only override color if no syntax highlighting is present
+                        if syntax_color.is_none() {
+                            span_style = span_style.fg(Color::Cyan);
+                        }
                     }
                     InlineStyle::Underline => {
                         span_style = span_style.add_modifier(Modifier::UNDERLINED);

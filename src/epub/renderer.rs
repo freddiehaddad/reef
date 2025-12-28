@@ -296,24 +296,70 @@ fn process_code_block(element: ElementRef, lines: &mut Vec<RenderedLine>) {
         let code_text = get_text_content(code_elem);
         let language = detect_language(code_elem);
 
-        // Highlight code
+        // Highlight code - returns Vec<(text_chunk, color)>
         let highlighted = CODE_HIGHLIGHTER.highlight_code(&code_text, language.as_deref());
 
-        // Add highlighted lines
-        for (text, _color) in highlighted {
-            for line in text.lines() {
-                lines.push(RenderedLine {
-                    text: line.to_string(),
-                    style: LineStyle::CodeBlock {
-                        language: language.clone(),
-                    },
-                    search_matches: Vec::new(),
-                    inline_styles: Vec::new(),
-                });
+        // Build lines with syntax highlighting colors
+        // The highlighted output is a sequence of (text, color) tuples where each text chunk
+        // has a uniform color. We need to split by newlines and track color ranges per line.
+        let mut current_line = String::new();
+        let mut current_line_colors: Vec<(usize, usize, ratatui::style::Color)> = Vec::new();
+        let mut char_offset = 0; // Position in current line
+
+        for (text_chunk, color) in highlighted {
+            // Process this text chunk character by character
+            for ch in text_chunk.chars() {
+                if ch == '\n' {
+                    // End of line - flush current line
+                    lines.push(RenderedLine {
+                        text: current_line.clone(),
+                        style: LineStyle::CodeBlock {
+                            language: language.clone(),
+                        },
+                        search_matches: Vec::new(),
+                        inline_styles: Vec::new(),
+                        syntax_colors: current_line_colors.clone(),
+                    });
+                    current_line.clear();
+                    current_line_colors.clear();
+                    char_offset = 0;
+                } else {
+                    // Regular character - add to current line
+                    let start_offset = char_offset;
+                    current_line.push(ch);
+                    char_offset += 1;
+
+                    // Add or extend color range
+                    if let Some(last) = current_line_colors.last_mut() {
+                        // If the last color matches and is contiguous, extend it
+                        if last.2 == color && last.1 == start_offset {
+                            last.1 = char_offset;
+                        } else {
+                            // Different color or gap - start new range
+                            current_line_colors.push((start_offset, char_offset, color));
+                        }
+                    } else {
+                        // First character in line
+                        current_line_colors.push((start_offset, char_offset, color));
+                    }
+                }
             }
         }
+
+        // Flush any remaining content (last line without trailing newline)
+        if !current_line.is_empty() {
+            lines.push(RenderedLine {
+                text: current_line,
+                style: LineStyle::CodeBlock {
+                    language: language.clone(),
+                },
+                search_matches: Vec::new(),
+                inline_styles: Vec::new(),
+                syntax_colors: current_line_colors,
+            });
+        }
     } else {
-        // Treat as preformatted text
+        // Treat as preformatted text without highlighting
         let text = get_text_content(element);
         for line in text.lines() {
             lines.push(RenderedLine {
@@ -321,6 +367,7 @@ fn process_code_block(element: ElementRef, lines: &mut Vec<RenderedLine>) {
                 style: LineStyle::CodeBlock { language: None },
                 search_matches: Vec::new(),
                 inline_styles: Vec::new(),
+                syntax_colors: Vec::new(),
             });
         }
     }
@@ -345,6 +392,7 @@ fn process_image(element: ElementRef, lines: &mut Vec<RenderedLine>) {
         style: LineStyle::Normal,
         search_matches: Vec::new(),
         inline_styles: Vec::new(),
+        syntax_colors: Vec::new(),
     });
     add_blank_line(lines);
 }
@@ -589,6 +637,7 @@ fn add_text_lines(
             style: style.clone(),
             search_matches: Vec::new(), // Will be populated during search
             inline_styles: line_inline_styles,
+            syntax_colors: Vec::new(),
         });
 
         // Move our position forward in the original text
@@ -614,6 +663,7 @@ fn add_blank_line(lines: &mut Vec<RenderedLine>) {
         style: LineStyle::Normal,
         search_matches: Vec::new(),
         inline_styles: Vec::new(),
+        syntax_colors: Vec::new(),
     });
 }
 
@@ -700,6 +750,7 @@ fn process_table(element: ElementRef, lines: &mut Vec<RenderedLine>, width: usiz
         style: LineStyle::Normal,
         search_matches: Vec::new(),
         inline_styles: Vec::new(),
+        syntax_colors: Vec::new(),
     });
 
     let tr_selector = Selector::parse("tr").unwrap();
@@ -744,6 +795,7 @@ fn process_horizontal_rule(lines: &mut Vec<RenderedLine>, width: usize) {
         style: LineStyle::Normal,
         search_matches: Vec::new(),
         inline_styles: Vec::new(),
+        syntax_colors: Vec::new(),
     });
     add_blank_line(lines);
 }
@@ -762,6 +814,7 @@ fn process_semantic_container(
             style: LineStyle::Quote,
             search_matches: Vec::new(),
             inline_styles: Vec::new(),
+            syntax_colors: Vec::new(),
         });
     } else if tag_name == "figure" {
         lines.push(RenderedLine {
@@ -769,6 +822,7 @@ fn process_semantic_container(
             style: LineStyle::Normal,
             search_matches: Vec::new(),
             inline_styles: Vec::new(),
+            syntax_colors: Vec::new(),
         });
     }
 
@@ -785,6 +839,7 @@ fn process_semantic_container(
             style: LineStyle::Quote,
             search_matches: Vec::new(),
             inline_styles: Vec::new(),
+            syntax_colors: Vec::new(),
         });
         add_blank_line(lines);
     }
@@ -802,6 +857,7 @@ fn process_navigation(
         style: LineStyle::Heading3,
         search_matches: Vec::new(),
         inline_styles: Vec::new(),
+        syntax_colors: Vec::new(),
     });
 
     // Process links in navigation
@@ -815,6 +871,7 @@ fn process_navigation(
                 style: LineStyle::Link,
                 search_matches: Vec::new(),
                 inline_styles: Vec::new(),
+                syntax_colors: Vec::new(),
             });
         }
     }
