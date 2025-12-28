@@ -7,23 +7,6 @@ use ratatui::{
 };
 
 pub fn render_help_popup(f: &mut Frame, _area: Rect) {
-    // Calculate popup size (70% width, 80% height)
-    let popup_width = (f.area().width as f32 * 0.7) as u16;
-    let popup_height = (f.area().height as f32 * 0.8) as u16;
-
-    let popup_x = (f.area().width.saturating_sub(popup_width)) / 2;
-    let popup_y = (f.area().height.saturating_sub(popup_height)) / 2;
-
-    let popup_area = Rect {
-        x: popup_x,
-        y: popup_y,
-        width: popup_width,
-        height: popup_height,
-    };
-
-    // Clear the area behind the popup
-    f.render_widget(Clear, popup_area);
-
     // Create help text
     let help_text = vec![
         Line::from(vec![Span::styled(
@@ -100,6 +83,35 @@ pub fn render_help_popup(f: &mut Frame, _area: Rect) {
             Style::default().fg(Color::Gray),
         )]),
     ];
+
+    // Calculate the width based on the longest line
+    let max_line_width = help_text
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.len())
+                .sum::<usize>()
+        })
+        .max()
+        .unwrap_or(0) as u16;
+
+    // Add padding for borders (2 chars) and some margin (4 chars)
+    let popup_width = (max_line_width + 6).min(f.area().width.saturating_sub(4));
+    let popup_height = (f.area().height as f32 * 0.8) as u16;
+
+    let popup_x = (f.area().width.saturating_sub(popup_width)) / 2;
+    let popup_y = (f.area().height.saturating_sub(popup_height)) / 2;
+
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    // Clear the area behind the popup
+    f.render_widget(Clear, popup_area);
 
     let paragraph = Paragraph::new(help_text)
         .block(
