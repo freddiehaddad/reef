@@ -42,9 +42,11 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
     let mut toc_bookmarks_constraints = Vec::new();
     if app.toc_panel_visible {
         toc_bookmarks_constraints.push(Constraint::Length(app.config.toc_panel_width));
+        toc_bookmarks_constraints.push(Constraint::Length(1)); // Left margin
     }
     toc_bookmarks_constraints.push(Constraint::Min(0)); // Main content
     if app.bookmarks_panel_visible {
+        toc_bookmarks_constraints.push(Constraint::Length(1)); // Right margin
         toc_bookmarks_constraints.push(Constraint::Length(app.config.bookmarks_panel_width));
     }
     
@@ -57,10 +59,14 @@ pub fn render(f: &mut Frame, app: &mut AppState) {
     if app.toc_panel_visible {
         render_toc(f, app, content_chunks[chunk_index]);
         chunk_index += 1;
+        // Skip the left margin chunk
+        chunk_index += 1;
     }
     render_content(f, app, content_chunks[chunk_index]);
     chunk_index += 1;
     if app.bookmarks_panel_visible {
+        // Skip the right margin chunk
+        chunk_index += 1;
         render_bookmarks(f, app, content_chunks[chunk_index]);
     }
     
