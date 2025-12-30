@@ -13,7 +13,10 @@ pub fn render_bookmark_prompt(
     suggestion: Option<&str>,
     error: Option<&str>,
 ) {
-    let area = centered_rect(50, 25, frame.area());
+    // Calculate height based on content
+    // 1 (prompt) + 1 (input) + 1 (spacing) + 2 (suggestion) + 2 (hint/error) + 2 (borders) = 9 lines
+    let content_height = 9;
+    let area = centered_rect_fixed(50, content_height, frame.area());
 
     // Clear the area
     frame.render_widget(Clear, area);
@@ -77,14 +80,14 @@ pub fn render_bookmark_prompt(
     }
 }
 
-/// Create a centered rect using a percentage of the available space
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+/// Create a centered rect with fixed height and percentage width
+fn centered_rect_fixed(percent_x: u16, height: u16, area: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Min(0),
+            Constraint::Length(height),
+            Constraint::Min(0),
         ])
         .split(area);
 

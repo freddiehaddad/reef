@@ -51,8 +51,8 @@ reef --help
 - `Enter` - Navigate to selected chapter
 - `/` - Search
 - `n/N` - Next/previous search result
-- `m` - Add bookmark
-- `B` - Toggle bookmarks panel
+- `Ctrl-M` - Add bookmark
+- `b` - Toggle bookmarks panel
 - `z` - Toggle zen mode
 - `w` - Cycle text width presets
 - `?` - Help

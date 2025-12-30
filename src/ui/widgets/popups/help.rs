@@ -53,7 +53,7 @@ pub fn render_help_popup(f: &mut Frame, _area: Rect) {
         Line::from(""),
         Line::from("  /                  Open search"),
         Line::from("  n / N              Next/previous search result"),
-        Line::from("  m                  Add bookmark at cursor"),
+        Line::from("  Ctrl-m             Add bookmark at cursor"),
         Line::from("  d                  Delete bookmark (in bookmarks panel)"),
         Line::from(""),
         Line::from(vec![Span::styled(

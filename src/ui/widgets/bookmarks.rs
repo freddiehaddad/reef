@@ -46,7 +46,7 @@ impl<'a> BookmarksPanel<'a> {
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Press 'm' to add",
+                    "Press Ctrl-M to add",
                     Style::default().fg(Color::DarkGray),
                 )),
             ];

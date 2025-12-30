@@ -196,6 +196,14 @@ impl AppState {
     pub fn toggle_bookmarks(&mut self) {
         self.bookmarks_panel_visible = !self.bookmarks_panel_visible;
 
+        // If opening bookmarks panel and there are bookmarks, initialize selection
+        if self.bookmarks_panel_visible
+            && !self.bookmarks.is_empty()
+            && self.selected_bookmark_idx.is_none()
+        {
+            self.selected_bookmark_idx = Some(0);
+        }
+
         // If closing bookmarks panel while it has focus, move focus back to Content
         if !self.bookmarks_panel_visible && self.focus == FocusTarget::Bookmarks {
             self.focus = FocusTarget::Content;
