@@ -651,7 +651,9 @@ fn add_text_lines(
         //   Line 1: "word1"  (chars 0-5)
         //   Space at position 5 is removed by wrapping
         //   Line 2: "word2"  (chars 6-11 in original, but we need to account for the space)
-        if char_offset < text.len() && text.chars().nth(char_offset) == Some(' ') {
+        //
+        // Note: char_offset is a BYTE offset, not a character offset
+        if char_offset < text.len() && text.as_bytes().get(char_offset) == Some(&b' ') {
             char_offset += 1;
         }
     }
