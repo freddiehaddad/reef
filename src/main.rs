@@ -49,7 +49,11 @@ async fn run() -> Result<()> {
     // Initialize logging if requested
     if let Some(log_file) = &cli.log_file {
         init_logging(log_file)?;
-        log::info!("=== EPUB Reader starting ===");
+        log::info!(
+            "=== {} v{} starting ===",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        );
         log::info!("Log file: {}", log_file);
         if let Some(file) = &cli.file {
             log::info!("Loading file: {}", file);
@@ -176,7 +180,7 @@ async fn run_app(cli: Cli, running: Arc<AtomicBool>) -> Result<()> {
     // Save state before quitting
     save_app_state(&mut app);
 
-    log::info!("EPUB Reader shutting down");
+    log::info!("{} Reader shutting down", env!("CARGO_PKG_NAME"));
     Ok(())
 }
 
